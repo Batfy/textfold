@@ -542,6 +542,7 @@ html[data-lang="th"] .u[data-l="1"] { line-height: calc(1.6 * var(--lh, 1)); }
 .rel-supports { --rel: var(--rel-supports); } .rel-builds_on { --rel: var(--rel-builds_on); } .rel-qualifies { --rel: var(--rel-qualifies); }
 .rel-explains { --rel: var(--rel-explains); } .rel-ref { --rel: var(--rel-ref); }
 html.morphing .side, html.morphing .lside { opacity: 0 !important; transition: none !important; }
+html.simple-switch .chunk, html.simple-switch .u, html.simple-switch .dot, html.simple-switch .fbody { transition: none !important; animation: none !important; }
 .u.linked > .tx, figure.fig.linked, .hd.linked { background: color-mix(in srgb, var(--accent-soft) 80%, transparent); border-radius: 6px; }
 /* Topic map: the hovered chip's links stay lit, tinted by relation; the rest steps back */
 .u[data-l="0"] { transition: opacity .22s, background-color .22s, border-color .22s, color .22s; }

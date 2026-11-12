@@ -1,13 +1,9 @@
-// TextFold: the paper at five zoom levels, morphing word by word.
+// TextFold: the paper at five zoom levels.
 // Level 4 Full · 3 Brief (the author's key sentences) · 2 Key (written: takeaway and reason) · 1 Takeaway · 0 Topic.
-// (Until v0.9 the reader called 3 "Key" and 2 "Brief"; the code's comments still say so.) Every visible piece
-// (word, formula, dot, heading, figure) is an element with a data-id that
-// persists across levels; a level change is FLIP: measure, re-render, put each
-// surviving piece back where it was, then let it slide home. A formula keeps
-// its id across languages too, so switching EN/中文 slides it to its new place.
-// A zoom gesture (wheel, pinch, slider, keys) does not lay anything out while it
-// runs: it plays keyframes of the screen at each level, prepared while the reader
-// was still ("the stage"), and the page takes over again at rest.
+// (Until v0.9 the reader called 3 "Key" and 2 "Brief"; the code's comments still say so.)
+// Level changes redraw at the destination and preserve the reading position. The
+// level bar can track a gesture continuously; the page switches when it settles.
+// FLIP remains for changes within a level, such as opening one paragraph or changing language.
 // Links: the author's cross-references and the model's argument links, as
 // sidenotes (Full, Key, Brief), and on the Topic map by
 // letting a chip's linked chips stay lit while the rest of the map steps back.
@@ -964,12 +960,8 @@
     window.scrollBy(0, r.top + anchor.frac * r.height - anchor.y);
   }
 
-  // ── zoom as a position, not a jump ───────────────────────────────────
-  // The wheel, a pinch and the slider move one continuous position (4 = Full … 0 = Topic). The reader can stop
-  // half way, or turn back; when the input stops, the position springs to the nearer level. The motion itself
-  // is the stage's (below) when its keyframes are ready. Otherwise it is live: leaving a level prepares the
-  // change to the next one for what is on screen (everything else waits, see renderAll), with its motion
-  // paused, and the position sets how far the motion has run, frame by frame.
+  // ── level control ───────────────────────────────────────────────────
+  // The wheel, a pinch and the slider move the thumb continuously; releasing switches the page once to the nearest level.
   const K_BAND = { 4: 30, 3: 45, 2: 60, 1: 150 };
   let pos = 4, goal = 4, tr = null, rafId = 0, lastT = 0, holding = false, snapTimer = 0;
   let aimLevel = null, aimAnchor = null, gesturePoint = null;
@@ -1028,67 +1020,59 @@
     settle(anchor);
     for (let i = 0; i < 3 && drawStaleInView(160); i++) settle(anchor);
   }
-  function apply() {
-    if (stage && stageFrame()) return;
-    if (!tr) {
-      if (Math.abs(pos - level) < 1e-3) return;
-      if (!stageOff && stageBegin() && stageFrame()) return;
-      prepare(aimLevel !== null && aimLevel !== level ? aimLevel : pos < level ? level - 1 : level + 1);
-    }
-    const t = progress();
-    if (t >= 1 - 1e-3) {   // arrived; if the position goes on, so does the zoom
-      scrub(1); finish();
-      if (aimLevel === level) aimLevel = null;
-      if (Math.abs(pos - level) > 1e-3) apply();
-      return;
-    }
-    if (t < 0) {           // turned back past the level it started from
-      revert();
-      if (Math.abs(pos - level) > 1e-3) apply();
-      return;
-    }
-    scrub(t);
-  }
   function tick(now) {
     rafId = 0;
     const dt = lastT ? Math.min(50, now - lastT) : 16;
     lastT = now;
     pos += (goal - pos) * (1 - Math.exp(-dt / (holding ? 45 : 95)));   // follows the hand closely, settles softly
     if (Math.abs(goal - pos) < 0.004) pos = goal;
-    apply();
     placeThumb();
     if (pos !== goal) rafId = requestAnimationFrame(tick);
     else { lastT = 0; rest(); }
   }
   const kick = () => { if (mapShown) mapAway(); if (!rafId) rafId = requestAnimationFrame(tick); };
-  function release() {   // the hand let go: spring to the level it was heading for
+  function release() {   // the hand let go: settle the thumb, then switch once
     holding = false;
-    if (stage) { const d = pos - stage.last; goal = Math.max(0, Math.min(4, Math.abs(d) > 0.3 ? stage.last + Math.sign(d) : stage.last)); }
-    else if (tr) { const t = progress(); goal = t > 0.3 ? tr.to : tr.from; } else goal = Math.round(goal);
+    goal = Math.round(goal);
     kick();
   }
-  function rest() {
-    if (holding) return;
-    if (stage) {
-      const L = Math.round(pos);
-      if (Math.abs(pos - L) > 1e-3) { goal = L; kick(); return; }
-      stageCommit(Math.max(stage.lo, Math.min(stage.hi, L)));
-    } else if (tr) {
-      const t = progress();
-      if (t > 1e-3 && t < 1 - 1e-3) { goal = t > 0.5 ? tr.to : tr.from; kick(); return; }
-      if (t <= 1e-3) revert(); else finish();
+  function showLevel(L, anchor) {
+    const changed = L !== level || localLevel.size > 0;
+    pos = goal = L;
+    if (!changed) {
+      aimLevel = null;
+      aimAnchor = null;
+      gesturePoint = null;
+      updateBar();
+      return;
     }
-    stageOff = false;
+    const keep = anchor && anchor.el && anchor.el.isConnected ? anchor : defaultAnchor();
+    clearFocus();
+    mapAway();
+    document.documentElement.classList.add('simple-switch');
+    localLevel.clear();
+    level = L;
+    docEl.dataset.level = L;
+    document.documentElement.dataset.level = L;
+    const hot = unitsNear(innerHeight * 1.5, innerHeight * 1.5);
+    const band = L === 0 ? null : bandAround(keep, K_BAND[L], hot);
+    renderAll(hot, band);
+    settle(keep);
+    for (let i = 0; i < 3 && drawStaleInView(160); i++) settle(keep);
     busy = false;
+    stageOff = false;
     aimLevel = null;
+    aimAnchor = null;
     gesturePoint = null;
     document.documentElement.classList.remove('morphing');
     updateBar();
     relayout();
     refreshStale();
-    hydrateSoon();
-    warmSoon();
-    if (queued) { const q = queued; queued = null; q(); }
+    requestAnimationFrame(() => document.documentElement.classList.remove('simple-switch'));
+  }
+  function rest() {
+    if (holding) return;
+    showLevel(Math.round(pos), anchorNow());
   }
   function zoomBy(dz, point) {
     if (!selbar.hidden) hideSelbar();
@@ -1102,43 +1086,21 @@
     snapTimer = setTimeout(release, 160);
     kick();
   }
-  // a jump to a level (a click, a key, a link): one motion straight there
+  // a jump to a level (a click, a key, a link): redraw directly at the destination
   function setLevel(L, anchor) {
     if (!selbar.hidden) hideSelbar();
     if (popNote) closeNote();
     L = Math.max(0, Math.min(4, Math.round(L)));
     if (busy && !tr && !stage) { queued = () => setLevel(L, anchor); return; }
-    if (stage) { aimLevel = L; holding = false; goal = L; kick(); return; }   // the stage plays on to L
-    if (tr) { if (progress() > 0.5) { scrub(1); finish(); } else revert(); pos = goal = level; }
-    if (L === level) {
-      if (localLevel.size) {   // close the paragraphs the reader opened
-        const band = level === 0 ? null : bandAround(anchor || defaultAnchor(), K_BAND[level], new Set());
-        morph(() => { localLevel.clear(); renderAll(unitsNear(innerHeight, innerHeight), band); }, anchor || defaultAnchor());
-      }
-      return;
-    }
-    aimLevel = L;
-    aimAnchor = anchor || null;
-    gesturePoint = null;
+    clearTimeout(snapTimer);
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    lastT = 0;
     holding = false;
-    goal = L;
-    kick();
+    showLevel(L, anchor || defaultAnchor());
   }
-  // after a pause in scrolling, what is on screen becomes tokens, so the next zoom starts without that work
-  let hydrateTimer = 0;
-  function hydrateSoon() {
-    clearTimeout(hydrateTimer);
-    hydrateTimer = setTimeout(() => { if (!busy && !reduced) hydrate(200); }, 220);
-  }
-  // ── the stage: a zoom that lays nothing out ──────────────────────────
-  // Crossing a level above costs one layout of everything near the reader (30-70 ms on an ordinary paper), a
-  // hitch the hand feels on the wheel and on the slider. So while the reader is still, the stretch of paper on
-  // screen is laid out at each level ahead of time, one level per idle moment, and every visible piece of it is
-  // kept as a positioned copy: five keyframes. A zoom hides the page and plays the keyframes on a stage above it:
-  // a piece present at two neighbouring levels slides and scales from one to the other, a piece present at one
-  // fades. Every frame, level crossings included, only moves and fades copies. At rest the page is drawn at the
-  // level reached, exactly as its keyframe was, and takes the stage's place in the same frame. Where no keyframe
-  // is ready (a fresh page, a far jump), the zoom falls back to the live motion above.
+  // The former staged zoom renderer is left dormant; level changes use showLevel() directly.
+  // ── staged renderer (inactive) ───────────────────────────────────────
   const stageEl = h('div', 'zstage');
   // The stage and its sandbox live in a closed shadow tree. The thousands of copies they add, move and drop are then
   // not in the page's document: nothing watching the page (browser extensions above all: translators, ad blockers,
@@ -1548,8 +1510,8 @@
     return true;
   }
 
-  // while the reader is still: the next keyframe that is missing, one per task, nearest level first
-  function warmSoon(ms = 360) { clearTimeout(warmTimer); if (!reduced) warmTimer = setTimeout(warm, ms); }
+  // Keyframe preparation is disabled along with the staged zoom renderer.
+  function warmSoon() {}
   function warm() {
     if (busy || stage || tr || drag || holding || localLevel.size || staleQ.length || document.hidden) return;
     if (performance.now() - lastScrollT < 180) return warmSoon(200);
@@ -1726,18 +1688,12 @@
     return { n: errs.length, med: Math.round((errs[errs.length >> 1] || 0) * 100) / 100, max: Math.round((errs[errs.length - 1] || 0) * 100) / 100 };
   }
   function snapNow() {
-    if (!stage) return;
     clearTimeout(snapTimer);
-    holding = false;
-    cancelAnimationFrame(rafId); rafId = 0; lastT = 0;
-    pos = goal = Math.max(stage.lo, Math.min(stage.hi, Math.round(pos)));
-    stageFrame();
-    rest();
+    if (holding || Math.abs(pos - level) > 1e-3) release();
   }
   addEventListener('scroll', () => {
     lastScrollT = performance.now();
-    if (stage && Math.abs(scrollY - stage.sy) > 1) snapNow();
-    if (!busy) { hydrateSoon(); warmSoon(200); }   // a fifth of a second still: the reader stopped there
+    if (!busy) warmSoon(200);
   }, { passive: true });
   addEventListener('pointermove', (e) => { lastPointer = { x: e.clientX, y: e.clientY }; if (level < 4 && !busy) warmSoon(); }, { passive: true });
 
@@ -1910,7 +1866,7 @@
     if (!el) return;
     if (!visibleRect(el) && level < 3) {      // an equation or table body is hidden below Key: step in first
       setLevel(3);
-      setTimeout(() => go(el, from), DUR + 120);
+      afterZoom(() => go(el, from));
       return;
     }
     backTo = { y: scrollY, level, from };
@@ -1924,7 +1880,7 @@
     if (!b) return;
     if (b.level !== level) {
       setLevel(b.level);
-      setTimeout(() => { if (b.from) { b.from.scrollIntoView({ block: 'center', behavior: 'smooth' }); flash(b.from); } }, DUR + 80);
+      afterZoom(() => { if (b.from) { b.from.scrollIntoView({ block: 'center', behavior: 'smooth' }); flash(b.from); } });
     } else {
       window.scrollTo({ top: b.y, behavior: reduced ? 'auto' : 'smooth' });
       if (b.from) flash(b.from);
@@ -4983,7 +4939,6 @@ math { font-size: 1.05em; }
   docEl.addEventListener('load', () => { capEpoch++; warmSoon(); }, true);   // an image arrived: the layout moved
   addEventListener('load', () => { relayout(); warmSoon(); });
   if (window.__drPerf) window.__drPerf.push(['boot', Math.round(performance.now())]);
-  hydrateSoon();
   warmSoon(600);
   loadNotes();
   try { if (PDF_OK && innerWidth >= 1100 && localStorage.getItem(CMP_KEY) === '1') openCompare(); } catch { /* private window */ }
@@ -4999,7 +4954,7 @@ math { font-size: 1.05em; }
     const el = k && k.pid === D.meta.id && unitEl.get(k.uid);
     if (el) {
       const back = () => requestAnimationFrame(() => scrollBy(0, el.getBoundingClientRect().top - k.top));
-      if (typeof k.level === 'number' && k.level !== level) { setLevel(k.level); setTimeout(back, DUR + 120); } else back();
+      if (typeof k.level === 'number' && k.level !== level) { setLevel(k.level); afterZoom(back); } else back();
     }
   } catch { /* private window */ }
   // the reader's language, from the app (its settings, the landing's menus): the interface speaks it when it has the
@@ -5034,7 +4989,7 @@ math { font-size: 1.05em; }
       sc.hd.classList.toggle('rvh', !!(review && review.heads.has(cid)));
       sc.hd.classList.toggle('rvc', !!(review && review.heads.has(cid) && review.heads.get(cid).includes(cur)));
     }
-    if (review && level !== 4) { if (goal !== 4) setLevel(4); return; }   // (drawn as it zooms in)
+    if (review && level !== 4) { if (goal !== 4) setLevel(4); return; }   // (switched directly)
     for (const uid of touched) if (unitEl.has(uid)) renderUnit(uid, unitEl.get(uid)._mode === 'tok');
   }
   // the reader at another place: lit, and in the middle of the page
@@ -5042,7 +4997,7 @@ math { font-size: 1.05em; }
     if (!review || !review.list[k]) return;
     const x = review.list[k], before = review.cur;
     review.cur = k;
-    if (level !== 4) { if (goal !== 4) setLevel(4); setTimeout(() => { if (level === 4) reviewGo(k); }, DUR + 120); return; }
+    if (level !== 4) { setLevel(4); afterZoom(() => { if (level === 4) reviewGo(k); }); return; }
     const near = [before, k].map((j) => review.list[j]).filter(Boolean);
     if (near.some((y) => y.section)) setReview(review.list, k);
     else for (const uid of new Set(near.flatMap((y) => [y.at.unit, ...y.words.map((w) => w.unit)]))) if (unitEl.has(uid)) renderUnit(uid, unitEl.get(uid)._mode === 'tok');

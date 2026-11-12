@@ -152,11 +152,10 @@ versioned layers in `papers/<id>/layers/` (`en.json`, `tr-<lang>.json`); the rea
 model call, so it reads the same every time it is opened. Regenerate writes a new version; a translation built on an
 older English version is marked outdated. Model replies are also cached by prompt in `papers/<id>/llm-cache/`.
 
-In the page: pinch or ⌘/Ctrl-scroll zooms around the pointer, scrolling over the level bar or dragging it zooms too,
-keys `1`–`5` jump to a level, `-`/`=` step, `L` cycles languages, clicking a paragraph below Full opens just that one,
-`Esc` closes it. The zoom is continuous: it can stop half way or turn back, and it lays nothing out while it runs. When
-the reader is still, the screen is laid out at each level ahead of time (in a hidden copy, one level per idle moment),
-and a zoom plays those keyframes; the page takes over again at rest.
+In the page: pinch or ⌘/Ctrl-scroll moves the level bar around the pointer, scrolling over the level bar or dragging it
+moves the bar too; when the gesture ends, the reader switches directly to the nearest level. Clicking a level or
+pressing `1`–`5` switches directly; `-`/`=` steps, `L` cycles languages, clicking a paragraph below Full opens just that
+one, and `Esc` closes it. The reader keeps the reading position during a level change.
 
 Notes: select text anywhere (a paragraph at any level, a section's summary or its title) to highlight it, write a note,
 or ask the model about it (the answer, in the reading language, cites the paragraphs it rests on; a cite opens that
@@ -390,17 +389,10 @@ into its `assets/` beside the pages; a single exported file carries the Latin fa
 math that matches no formula of the paper, and Mermaid (3.5 MB) when the text has a diagram. (Loading Google Fonts sends a visitor's IP address to Google, which a German court
 found unlawful without consent in 2022.)
 
-## Smoothness is a rule
+## Level changes
 
-No change may make the zoom less smooth. Measure before and after with the GPU at 2x pixels, reading the frames the
-screen actually showed, on a dense paper (2512.23916):
-
-```bash
-python3 -m textfold export 2512.23916
-python3 tools/zoombench.py 2512.23916                 # out/compare/<id>/<version>.html pages
-```
-
-Frame intervals from requestAnimationFrame in a default headless browser hide most of what a reader feels.
+Level changes are direct redraws. The level bar follows a pinch, ⌘/Ctrl-scroll or drag, then the page switches once
+the gesture settles. The older staged zoom renderer and `tools/zoombench.py` remain in the repository but are inactive.
 
 ## Layout
 
@@ -447,7 +439,7 @@ tests/          python3 -m unittest discover tests: the arXiv page's safety pass
                 agents on Windows
 desktop/       the app (its README): Electron around the same server, with its own Python; desktop/scripts/smoke.py
                 checks that Python before it ships (.github/workflows/desktop.yml)
-tools/zoombench.py  zoom smoothness as the screen sees it (GPU, 2x, Chrome's frame trace), on out/compare/<id>/ pages
+tools/zoombench.py  legacy benchmark for the inactive staged zoom renderer
 tools/readme_assets.py  the README's pictures, made from a real paper in the reader
 ```
 
