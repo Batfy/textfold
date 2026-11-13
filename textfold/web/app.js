@@ -80,7 +80,7 @@
     if (landing) renderLanding();
     renderTop();
     if (window.__reader && window.__reader.setUi) window.__reader.setUi(code);
-    document.dispatchEvent(new Event('tf-lang'));   // (what else speaks it: the app's update)
+    document.dispatchEvent(new Event('tf-lang'));
   }
   let papers = BOOT.papers || [];
   // a job started elsewhere on the page (a record being written, notes.js): the sidebar shows it at once
@@ -909,8 +909,8 @@
     : msg === 'web-notext' ? t().web_notext : msg === 'web-pdf' ? t().web_pdf : msg === 'web-blocked' ? t().web_blocked
     : /^net-down:/.test(msg) ? t().net_down.replace('{host}', msg.slice(9) || '?') : msg);   // (fetch.Unreachable)
 
-  // the corner where the page says what is under way, one above the other: a generation, the app's update. Each toast
-  // is a small card: a sign at the left, what happens beside it, then its line, its progress or its buttons below.
+  // the corner where the page says what is under way, one above the other. Each toast is a small card: a sign at the
+  // left, what happens beside it, then its line, its progress or its buttons below.
   const toasts = h('div', 'toasts'); document.body.append(toasts);
   const SIGN = {
     done: '<path d="M5.5 10.5l3 3 6-6.5"/>',
@@ -980,36 +980,6 @@
     if (u && Array.isArray(u.ids) && u.until > Date.now()) offerUndo(u);
   } catch { /* private window */ }
 
-  // ── the app's own updates (desktop/main.js): a newer release, downloaded and installed when the reader says ──
-  if (window.desktop && window.desktop.onUpdate) {
-    const D = window.desktop, box = h('div', 'gen-toast upd-toast');
-    let last = null, fade = 0;
-    box.hidden = true; toasts.append(box);
-    const SAID = { latest: 'up_latest', 'check-failed': 'up_check_failed', dev: 'up_dev' };   // answers to a check by hand
-    const show = (s) => {
-      last = s;
-      clearTimeout(fade);
-      const T = t(), v = (x) => esc(x.replace('{v}', (s && s.version) || ''));
-      box.hidden = !s || s.dismissed || !['available', 'downloading', 'ready', 'failed', ...Object.keys(SAID)].includes(s.kind);
-      if (box.hidden) return;
-      const x = shut(T.close);
-      const go = (label, primary) => `<span class="g-acts"><button type="button" class="g-go${primary ? ' primary' : ''}">${esc(label)}</button></span>`;
-      box.innerHTML = SAID[s.kind] ? `${sign(s.kind === 'latest' ? 'done' : 'warn', s.kind === 'latest' ? 'ok' : 'warn')}<b>${esc(T[SAID[s.kind]])}</b>${x}`
-        : s.kind === 'available' ? `${sign('down')}<b>${v(T.up_new)}</b>${x}${go(T.up_get, true)}`
-        : s.kind === 'downloading' ? `${sign('down')}<b>${esc(T.up_getting.replace('{p}', s.percent || 0))}</b><span class="sb-prog"><i style="width:${Math.max(3, s.percent || 0)}%"></i></span>`
-        : s.kind === 'ready' ? `${sign('restart')}<b>${v(T.up_ready)}</b>${x}${go(T.up_restart, true)}`
-        : `${sign('warn', 'warn')}<b>${esc(T.up_failed)}</b>${x}${go(T.up_retry)}`;
-      if (s.transient) fade = setTimeout(() => { box.hidden = true; }, 6000);
-      const close = box.querySelector('.g-x');
-      if (close) close.onclick = () => { box.hidden = true; if (!s.transient) D.dismissUpdate(); };
-      const b = box.querySelector('button.g-go');
-      if (b) b.onclick = () => { b.disabled = true; if (s.kind === 'ready') D.installUpdate(); else D.downloadUpdate(); };
-    };
-    D.onUpdate(show);
-    D.updateState().then(show).catch(() => {});
-    document.addEventListener('tf-lang', () => show(last));
-  }
-
   // ── what is new (news.py): the first time TextFold opens after an update, the words of the releases since the one
   //    the reader was last told of, in a dialog (theirs, in Chinese or else in English); a quiet release only says it is
   //    installed. Settings opens the newest release's words again ──
@@ -1032,7 +1002,7 @@
     if (w.news.length) showNews(w.news);
     else {   // (a quiet release: that it is installed, for a moment)
       const box = h('div', 'gen-toast'); toasts.append(box);
-      box.innerHTML = `${sign('done', 'ok')}<b>${esc(t().up_done.replace('{v}', w.version))}</b>${shut(t().close)}`;
+      box.innerHTML = `${sign('done', 'ok')}<b>${esc(t().app_done.replace('{v}', w.version))}</b>${shut(t().close)}`;
       box.querySelector('.g-x').onclick = () => box.remove();
       setTimeout(() => box.remove(), 8000);
     }
@@ -1973,7 +1943,7 @@
         <div class="stp-body">
         <section><div class="st-list">
           <div class="st-item"><label class="st-main" for="st-ui"><b>${esc(t.language)}</b></label><select class="st-ui" id="st-ui">${I18N.CODES.map((c) => `<option value="${c}"${c === uiLang ? ' selected' : ''}>${esc(I18N.NATIVE[c])}</option>`).join('')}</select></div>
-          ${app || news ? `<div class="st-item st-app"><div class="st-main"><b>TextFold ${esc(app || news.version)}</b><span class="st-meta">${app ? `${esc(t.up_note)} ` : ''}<a href="${REPO}" target="_blank" rel="noopener">★ ${esc(t.up_star)}</a></span><span class="st-upd-msg" aria-live="polite"></span></div>${news && news.last ? `<button type="button" class="st-btn st-news">${esc(t.up_whatsnew)}</button>` : ''}${app ? `<button type="button" class="st-btn st-upd">${esc(t.up_check)}</button>` : ''}</div>` : ''}
+          ${app || news ? `<div class="st-item st-app"><div class="st-main"><b>TextFold ${esc(app || news.version)}</b><span class="st-meta"><a href="${REPO}" target="_blank" rel="noopener">★ ${esc(t.app_star)}</a></span></div>${news && news.last ? `<button type="button" class="st-btn st-news">${esc(t.app_whatsnew)}</button>` : ''}</div>` : ''}
         </div></section>
         <section><h3>${esc(t.st_models_h)}</h3><div class="st-model-area">${modelSection()}${discoveryState()}</div></section>
         <section><h3>${esc(t.st_agents)}</h3><div class="st-agent-area">${loaded ? agentSection() : ''}</div></section>
@@ -2096,15 +2066,6 @@
       dlg.querySelectorAll('.st-close').forEach((b) => { b.onclick = () => dlg.close(); });
       const nb = q('.st-news');
       if (nb) nb.onclick = () => showNews([news.last]);
-      const up = q('.st-upd');
-      if (up) up.onclick = async () => {   // an answer either way; one found shows as the corner's toast too
-        const msg = q('.st-upd-msg'), t = T();
-        up.disabled = true; msg.textContent = '…';
-        const r = await window.desktop.checkForUpdates().catch(() => ({ kind: 'check-failed' }));
-        up.disabled = false;
-        msg.textContent = r.kind === 'latest' ? t.up_latest : r.kind === 'dev' ? t.up_dev : r.kind === 'check-failed' ? t.up_check_failed
-          : r.kind === 'ready' ? t.up_ready.replace('{v}', r.version) : t.up_new.replace('{v}', r.version || '');
-      };
       q('.st-ui').onchange = (e) => { setReaderLang(e.target.value); render(); };
       const sel = q('.st-model');
       if (sel) sel.onchange = async () => { delete tests.gen; if (!data.askModel) delete tests.ask; update(await api('/api/models/select', { model: sel.value })); };
@@ -2227,7 +2188,7 @@
     dlg.addEventListener('close', () => dlg.remove());
     render();
     dlg.showModal();
-    if (window.desktop && window.desktop.checkForUpdates) window.desktop.version().then((v) => {
+    if (window.desktop) window.desktop.version().then((v) => {
       app = v;
       if (dlg.isConnected && !form) render();
     }).catch(() => {});

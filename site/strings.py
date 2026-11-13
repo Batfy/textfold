@@ -64,8 +64,8 @@ S = {
 
     "which_mac": ('<b>Which Mac?</b> Apple menu › About This Mac: <em>Chip Apple M…</em> or <em>Processor Intel</em>.',
         '<b>哪种 Mac？</b>苹果菜单 › 关于本机：写着 <em>芯片 Apple M…</em> 或 <em>处理器 Intel</em>。'),
-    "app_meta": (f'Version {VERSION} · macOS 12 or later · The app updates itself.',
-        f'版本 {VERSION} · macOS 12 或更新 · 软件会自己更新。'),
+    "app_meta": (f'Version {VERSION} · macOS 12 or later · Get updates from GitHub Releases.',
+        f'版本 {VERSION} · macOS 12 或更新 · 更新时从 GitHub Releases 下载新版本。'),
     "for_you": ('For this computer',
         '适合这台电脑'),
 

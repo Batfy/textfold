@@ -305,9 +305,6 @@ button.primary:hover { background: var(--btn-hover); }
 .gen-toast .g-go:disabled { opacity: .6; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .gen-toast { animation: none; } }
 .st-app .st-uilang h3 { flex: 1; }
-.st-upd-msg { font-size: 12.5px; color: var(--muted); }
-.st-upd { font: 13px var(--sans); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
-.st-upd:disabled { opacity: .6; cursor: default; }
 
 /* ── settings ────────────────────────────────────────────── */
 dialog.settings { border: 1px solid var(--line); border-radius: 16px; padding: 0; width: min(660px, calc(100vw - 32px)); max-height: calc(100vh - 48px); background: var(--card); color: var(--ink);
@@ -438,8 +435,6 @@ label.st-main { cursor: default; }
 .st-acts { display: flex; gap: 6px; flex: none; }
 .st-foot-line { min-height: 46px; }
 .st-empty { margin: 0; padding: 10px 0; font-size: 13px; color: var(--muted); }
-.st-upd-msg { font-size: 12.5px; color: var(--accent); }
-.st-upd-msg:empty { display: none; }
 .st-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--r-result); box-shadow: 0 0 0 3px color-mix(in srgb, var(--r-result) 18%, transparent); }
 .st-dot.warn { background: var(--r-gap); box-shadow: 0 0 0 3px color-mix(in srgb, var(--r-gap) 18%, transparent); }
 .st-dot.bad { background: var(--r-limitation); box-shadow: 0 0 0 3px color-mix(in srgb, var(--r-limitation) 18%, transparent); }

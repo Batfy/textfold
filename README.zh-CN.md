@@ -338,7 +338,7 @@ TextFold 只是一个工具，它的许可证只管代码。分享文件时，�
 - **2026 年 10 月 15 日：Pi 的回答也能折叠了。** [Pi 扩展](https://github.com/chenxiachan/textfold/blob/main/plugins/pi-textfold/README.md) 把五个层级放到每条回答上，折法和 Claude Code 里一样。感谢 [@jlamweil](https://github.com/jlamweil)。
 - **2026 年 10 月 15 日：不装 PDF 引擎也能读 PDF。** 自带文字的 PDF（大多数论文都是）直接打开，图从原页上裁出来；只有扫描件还需要 PDF 引擎。没有 HTML 版本的 arXiv 论文改读它的 PDF。感谢 [@sylvainHellin](https://github.com/sylvainHellin)。
 - **2026 年 10 月 15 日：你的文献库和你的提问。** 文献库可以搜索、建文件夹，按添加时间或最近打开排序。提问有了发送和停止键，对话里任何一轮都可以删掉，回答问题还可以用比生成层级更强的模型。感谢 [@suhyungJang](https://github.com/suhyungJang)。
-- **2026 年 10 月 14 日：Mac 和 Windows 软件。** 下载 TextFold 的 macOS 版（Apple 芯片或 Intel，已签名并经苹果公证）或 Windows 版，需要的东西都在里面。它会找到你电脑上的 Claude Code、Codex 或 Pi，有新版本时经你同意自己更新。[下载 ↑](#开始使用)
+- **2026 年 10 月 14 日：Mac 和 Windows 软件。** 下载 TextFold 的 macOS 版（Apple 芯片或 Intel，已签名并经苹果公证）或 Windows 版，需要的东西都在里面。它会找到你电脑上的 Claude Code、Codex 或 Pi，当时也能经你同意自己更新。[下载 ↑](#开始使用)
 - **2026 年 10 月 14 日：直接读你的 Zotero 文献库。** 拖放框下面的 **Zotero 文献库** 按 Zotero 里的样子列出你的文献库和分类，任何条目点一下就能打开：arXiv 上有就读 arXiv，没有就读它自己的 PDF。感谢 [@adalach](https://github.com/adalach)。[直接读你的 Zotero ↑](#直接读你的-zotero)
 - **2026 年 10 月 14 日：读 arXiv 页面更安全了。** 页面里可能运行脚本的部分，会在阅读器显示之前去掉，图都保持原样。感谢 [@neil-patel77](https://github.com/neil-patel77)。
 - **2026 年 10 月 13 日：把一页存成一个文件。** 阅读页顶部的 **保存** 把整页存成一个 HTML 文件，可以带上标注和原文 PDF；也可以只存标注。[保存一页 ↑](#保存一页)

@@ -6,11 +6,10 @@
 // ~/.textfold. Pages on other sites open in the system browser, where the reader is already signed in.
 // Run from the repository without a payload (`npm start`), it uses the python3 on the PATH (python on Windows) and the
 // repository itself. textfold:// links open a document of the library in the window (links.js).
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, session, shell } = require('electron');
-const { execFile, spawn } = require('child_process');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } = require('electron');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
-const os = require('os');
 const path = require('path');
 const { Transform } = require('stream');
 const { StringDecoder } = require('string_decoder');
@@ -157,20 +156,6 @@ function stamped() {
   });
 }
 
-// The server stopped before the installer runs, on Windows with every process it started: the installer replaces
-// the bundled Python, and a file a process still has open cannot be replaced. Resolved once it has exited (or after
-// ten seconds, so that an update is never held up by it).
-function stopServer() {
-  const p = server;
-  if (!p || p.exitCode !== null || p.signalCode !== null) return Promise.resolve();   // (gone already)
-  return new Promise((resolve) => {
-    const done = setTimeout(resolve, 10000);
-    p.once('exit', () => { clearTimeout(done); resolve(); });
-    if (WIN) execFile('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true }, (err) => { if (err) p.kill(); });
-    else p.kill();
-  });
-}
-
 function startServer(port) {
   // A GUI app starts with a bare PATH: the usual install places are added so that the server finds node and npx
   // (the ChatGPT bridge) at once; on a Mac it also asks the login shell for the agents' places (textfold/agents.py).
@@ -270,141 +255,32 @@ ipcMain.handle('storage:choose-folder', async (e) => {
   return r.canceled ? null : r.filePaths[0] || null;
 });
 
-// ── updates ──────────────────────────────────────────────────────────
-// A packaged app asks GitHub for the newest release (its public latest*.yml) a few seconds after it starts and every
-// four hours; nothing of the reader's is sent. What it finds the page shows (app.js, in the reader's language). Nothing
-// downloads until the reader asks, and what was downloaded installs when they restart from the page, or when they next
-// quit. ThoughtDAG's flow. TEXTFOLD_UPDATES points it at another feed (a folder served over http), for a test run.
-let update = null;   // what the page shows: { kind: available | downloading | ready | failed, version, percent }
-function tell(s) {
-  update = s;
-  if (win && !win.isDestroyed()) win.webContents.send('update', s);
-}
-// an answer to a check by hand (the menu's): shown for a moment, never kept
-function answer(s) {
-  if (win && !win.isDestroyed()) win.webContents.send('update', { ...s, transient: true });
-}
-const REPO = 'https://github.com/chenxiachan/textfold';
-// The first launch after an update: what the update left is cleared (the page says what is new: news.py). A first
-// install has nothing to clear: the version it records is the next one's "was".
-function updatedFrom() {
-  const f = path.join(app.getPath('userData'), 'version');
-  let was = null;
-  try { was = fs.readFileSync(f, 'utf8').trim(); } catch { /* a first install */ }
-  try { fs.writeFileSync(f, app.getVersion()); } catch { /* a read-only folder: nothing to say next time */ }
-  return was && was !== app.getVersion() ? was : null;
-}
-// What an update was downloaded into stays after it is installed (electron-updater empties pending/ only for the next
-// one): a second copy of the app, 190 MB, beside the copy the next update's download of what changed starts from
-// (update.zip on a Mac, installer.exe on Windows). The first launch of the new version removes it, and once more a
-// minute later on Windows, where the installer that just ran may still hold its file.
-function dropDownloaded(again = true) {
-  let dir = null;
-  try {
-    const name = (fs.readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8').match(/^updaterCacheDirName:\s*([\w.-]+)\s*$/m) || [])[1];
-    const caches = WIN ? process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
-      : process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Caches') : process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
-    if (name && name !== '.' && name !== '..') dir = path.join(caches, name, 'pending');   // (electron-updater's own place)
-    if (dir) fs.rmSync(dir, { recursive: true, force: true });
-  } catch {
-    if (dir && again) setTimeout(() => dropDownloaded(false), 60 * 1000);
-  }
-}
 ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('window:fullscreen', (e, on) => {   // on: true or false; nothing: only whether it is
   const w = BrowserWindow.fromWebContents(e.sender);
   if (w && typeof on === 'boolean') w.setFullScreen(on);
   return Boolean(w && w.isFullScreen());
 });
-ipcMain.handle('update:state', () => (update && !update.dismissed ? update : null));
-ipcMain.handle('update:dismiss', () => { if (update) update.dismissed = true; });
-function setupUpdates() {
-  let updater;
-  try { ({ autoUpdater: updater } = require('electron-updater')); } catch { updater = null; }
-  if (!app.isPackaged || !updater) {
-    ipcMain.handle('update:check', () => ({ kind: 'dev' }));
-    menu(async () => ({ kind: 'dev' }));
-    return;
-  }
-  const was = updatedFrom();
-  if (was) {
-    dropDownloaded();
-    // and the window's HTTP cache, which an earlier version let grow (above); what a new version loads is new anyway
-    session.defaultSession.clearCache().catch(() => null);
-  }
-  if (process.env.TEXTFOLD_UPDATES) updater.setFeedURL({ provider: 'generic', url: process.env.TEXTFOLD_UPDATES });
-  updater.autoDownload = false;   // the reader starts the download, never the app
-  updater.on('update-available', (info) => {
-    if (update && (update.kind === 'downloading' || update.kind === 'ready' || update.kind === 'available' && update.version === info.version)) return;
-    tell({ kind: 'available', version: info.version });
-  });
-  let shown = -1;
-  updater.on('download-progress', (p) => {
-    if (win && !win.isDestroyed()) win.setProgressBar(p.percent / 100);   // the Dock's or the taskbar's bar too
-    const percent = Math.floor(p.percent);
-    if (percent !== shown) { shown = percent; tell({ ...update, kind: 'downloading', percent }); }
-  });
-  updater.on('update-downloaded', (info) => {
-    if (win && !win.isDestroyed()) win.setProgressBar(-1);
-    tell({ kind: 'ready', version: info.version });
-  });
-  const look = () => updater.checkForUpdates().catch(() => null);
-  setTimeout(look, 8000);
-  setInterval(look, 4 * 60 * 60 * 1000);
-  // a check by hand (Settings, the menu): always an answer, and a version dismissed earlier offered again
-  const byHand = async () => {
-    if (update && (update.kind === 'downloading' || update.kind === 'ready')) { tell({ ...update, dismissed: false }); return update; }
-    try {
-      const r = await updater.checkForUpdates();
-      if (!(r && r.isUpdateAvailable)) return { kind: 'latest', version: app.getVersion() };
-      tell({ kind: 'available', version: r.updateInfo.version });
-      return update;
-    } catch {
-      return { kind: 'check-failed' };
-    }
-  };
-  ipcMain.handle('update:check', byHand);
-  menu(byHand);
-  ipcMain.handle('update:download', () => {
-    if (!update || !['available', 'failed'].includes(update.kind)) return;
-    tell({ kind: 'downloading', version: update.version, percent: 0 });
-    updater.downloadUpdate().catch(() => {
-      if (win && !win.isDestroyed()) win.setProgressBar(-1);
-      tell({ kind: 'failed', version: update.version });
-    });
-  });
-  ipcMain.handle('update:install', async () => {
-    if (!update || update.kind !== 'ready') return;
-    await stopServer();   // (Windows: the installer replaces the bundled Python, which must not be running)
-    updater.quitAndInstall(true, true);   // on Windows silently, and the new version opens
-  });
-}
-
 // a table's words in the system's language (its own variant for Chinese in Taiwan, Hong Kong and Macao), else English
 function inLocale(table) {
   const loc = app.getLocale();
   return table[/^zh-(TW|HK|MO)|Hant/i.test(loc) ? 'zh-Hant' : loc.split('-')[0]] || table.en;
 }
 
-// The menu: the system's own, with Check for Updates (in the app's menu on a Mac, in Help on Windows) and the project
-// on GitHub. Its words follow the system's language, as the rest of the menu does.
-const CHECK = { en: 'Check for Updates…', zh: '检查更新…', 'zh-Hant': '檢查更新…', ja: 'アップデートを確認…', ko: '업데이트 확인…',
-  es: 'Buscar actualizaciones…', fr: 'Rechercher des mises à jour…', de: 'Nach Updates suchen …', pt: 'Procurar atualizações…',
-  it: 'Cerca aggiornamenti…', ru: 'Проверить обновления…', hi: 'अपडेट देखें…' };
-function menu(byHand) {
-  const label = inLocale(CHECK);
-  const check = { label, click: async () => { const r = await byHand(); if (r && r.kind !== 'available' && r.kind !== 'downloading' && r.kind !== 'ready') answer(r); } };
+// The system's own menu and the project on GitHub.
+const REPO = 'https://github.com/chenxiachan/textfold';
+function menu() {
   const github = { label: 'TextFold on GitHub', click: () => shell.openExternal(REPO) };
   const mac = process.platform === 'darwin';
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    ...(mac ? [{ role: 'appMenu', submenu: [{ role: 'about' }, check, { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+    ...(mac ? [{ role: 'appMenu', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : [{ role: 'fileMenu' }]),
     { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
-    { role: 'help', submenu: mac ? [github] : [check, github] },
+    { role: 'help', submenu: [github] },
   ]));
 }
 
-app.whenReady().then(() => { setupUpdates(); open(); });
+app.whenReady().then(() => { menu(); open(); });
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => { if (server) server.kill(); });
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) open(); });

@@ -8,8 +8,7 @@
 # On a Mac the icon is in macOS 26's own format, so that the system draws it as its own and not small on a grey plate:
 # desktop/build/Assets.car (with CFBundleIconName) and icon.icns for earlier systems, both compiled from
 # desktop/build/icon.icon on macOS 26 (icon.yml), the one system whose actool can draw it.
-# The release also carries what the installed apps update from (desktop/main.js): latest.yml for Windows, one
-# latest-mac.yml for both Macs (desktop/scripts/latest-mac.py), and each file's blockmap, for a download of what changed.
+# Releases contain the installers for each supported system.
 name: desktop
 on:
   push:
@@ -17,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "The app's version alone, for a test of its updates (an older build and a newer one); empty: the code's"
+        description: "Version for this build artifact; empty: the code's version"
         required: false
         default: ''
 
@@ -104,18 +103,14 @@ jobs:
           name: textfold-${{ matrix.name }}
           path: |
             desktop/out/*.dmg
-            desktop/out/*.zip
             desktop/out/*.exe
-            desktop/out/*.blockmap
-            desktop/out/latest*.yml
           if-no-files-found: error
       - name: Into the draft release
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           shopt -s nullglob
-          files=(desktop/out/*.dmg desktop/out/*.zip desktop/out/*.exe desktop/out/*.blockmap)
-          [ -f desktop/out/latest.yml ] && files+=(desktop/out/latest.yml)   # (a Mac's latest-mac.yml waits for the other's, below)
+          files=(desktop/out/*.dmg desktop/out/*.exe)
           gh release upload "$TAG" "${files[@]}" -R "$REPO" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -126,23 +121,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: textfold-mac-*
-          path: macs
-      - name: One update file for both Macs
-        run: |
-          python3 desktop/scripts/latest-mac.py macs/textfold-mac-arm64/latest-mac.yml macs/textfold-mac-x64/latest-mac.yml > latest-mac.yml
-          cat latest-mac.yml
-      - uses: actions/upload-artifact@v4
-        with:
-          name: textfold-mac-update
-          path: latest-mac.yml
-      - name: The release, once every system's app is in it
+      - name: Publish the release once every system's installer is ready
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          gh release upload "$TAG" latest-mac.yml -R "$REPO" --clobber
           gh release edit "$TAG" -R "$REPO" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
