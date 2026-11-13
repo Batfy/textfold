@@ -111,23 +111,23 @@
   applyType();
 
   // ── a unit in the current language ───────────────────────────────────
-  function view(uid) {
+  function view(uid, language = lang) {
     const u = U[uid];
-    const z = trOf(u);
+    const z = (u.tr && u.tr[language]) || null;
     const l = z ? z.lad : u.lad;
     // glue: the half of a sentence a page break left in the unit before this one (ladder.dress)
-    if (z) return { toks: z.toks, sents: z.sents, ev: u.lad.ev.filter((s) => s < z.sents.length), brief: l.brief, tn: l.tn, topic: l.topic, glue: l.glue, p: `${lang}~` };
+    if (z) return { toks: z.toks, sents: z.sents, ev: u.lad.ev.filter((s) => s < z.sents.length), brief: l.brief, tn: l.tn, topic: l.topic, glue: l.glue, p: `${language}~` };
     return { toks: u.toks, sents: u.sents, ev: u.lad.ev, brief: l.brief, tn: l.tn, topic: l.topic, glue: l.glue, p: '' };
   }
 
   // ── pieces: what a unit shows at a level ─────────────────────────────
   let review = null;   // an edit's places shown (setReview, below)
-  function pieces(uid, L) {
-    const v = view(uid), p = `${uid}:${v.p}`;
+  function pieces(uid, L, language = lang, withMarks = true) {
+    const v = view(uid, language), p = `${uid}:${v.p}`;
     const ev = new Set(v.ev);
     // with "keep my highlights" on, the passages the reader marked are a level of their own: they stay as the paper
     // zooms out (the sentences at Brief, the author's words after the written line at Key and Takeaway)
-    const mk = marksFor(uid), mine = keepMine && mk && L > 0 && L < 4 ? [...new Set([...mk.exact, ...mk.soft])].sort((a, b) => a - b) : null;
+    const mk = withMarks ? marksFor(uid) : null, mine = keepMine && mk && L > 0 && L < 4 ? [...new Set([...mk.exact, ...mk.soft])].sort((a, b) => a - b) : null;
     let out;
     if (L >= 4) {
       out = [];
@@ -3312,51 +3312,166 @@
     out.push('---', '', `*Made with [${BRAND}](${REPO})*`, '');
     return out.join('\n');
   }
-  // the whole text as Markdown at the level being read (a paragraph opened in place, as it is open), in the language
-  // being read: each heading, the section's summary where the level shows one (Topic, Takeaway, Key), then its
+  // The whole text as Markdown at a selected level and language, in source block order:
+  // each heading, the section's summary where the level shows one (Topic, Takeaway, Key), then its
   // paragraphs, a bullet each at the written levels and a paragraph each at Brief and Full. The marks chosen sit
   // under their paragraph (or section, or the title) as the notes' own file writes them; a highlight alone, in the
   // author's words that Brief and Full show, is marked in them (==…==) instead. At Topic it is an outline: the
   // headings and the paragraphs' topics, which an outliner or a mind-map plugin draws as a map
-  function docMarkdown(kinds) {
-    const m = D.meta, t = T[ui], title = m.name || (m.titles && m.titles[lang]) || m.title;
-    const out = mdHead(title, [`level: ${LEVEL_NAMES[level]}`, `lang: ${lang}`], null);
-    out.push(`*${t.levels[level]} · ${BRAND}*`, '');
+  function docMarkdown(kinds, L, language, htmlMarkdown) {
+    const m = D.meta, title = m.name || (m.titles && m.titles[language]) || m.title;
+    const out = mdHead(title, [`level: ${LEVEL_NAMES[L]}`, `lang: ${language}`], null);
+    out.push(`*${T[ui].levels[L]} · ${BRAND}*`, '');
     const mine = new Map();
     for (const n of inOrder(kinds)) { const k = keyOf(n.anchor); if (!mine.has(k)) mine.set(k, []); mine.get(k).push(n); }
     const notesAt = (k) => (mine.get(k) || []).flatMap((n) => noteMd(n, false));
     out.push(...notesAt('¶'));
     const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim();
-    for (const c of D.chunks) {
-      const sc = secs.get(c.id);
-      if (!sc || (level < 4 && sc.sec.classList.contains('ref'))) continue;   // (dropped at the folded levels, as on the page)
-      if (c.num || c.title) out.push(`${'#'.repeat(Math.min(6, c.level || 2))} ${headingOf(c)}`, '');
-      const sum = level <= 2 ? summaryOf(c) : '';
-      if (sum) out.push(`**${sum}**`, '');
-      out.push(...notesAt(`§${c.id}`));
-      let list = false;   // (bullets that follow one another: one list)
-      for (const uid of c.units) {
-        const L = levelOf(uid), u = U[uid], marks = mine.get(uid) || [], under = [];
-        let text = unitEl.has(uid) ? piecesText(pieces(uid, L)) : '';
+    const chunks = new Map(D.chunks.map((c) => [c.id, c]));
+    for (const b of D.blocks) {
+      const sc = secs.get(b.chunk);
+      if (L < 4 && sc && sc.sec.classList.contains('ref')) continue;
+      if (b.k === 'h') {
+        const c = chunks.get(b.chunk), tr = c.tr && c.tr[language], lad = (tr && tr.lad) || c.lad;
+        out.push(`${'#'.repeat(Math.min(6, c.level || 2))} ${[c.num, (tr && tr.title) || c.title].filter(Boolean).join(' ')}`, '');
+        if (L <= 2 && lad && lad.take.length) out.push(`**${toksText(lad.take, 0, lad.take.length - 1)}**`, '');
+        out.push(...notesAt(`§${c.id}`));
+      }
+      if (b.html && (L >= 3 || /<(img|svg)\b/i.test(b.html))) out.push(htmlMarkdown(b.html), '');
+      const uid = b.u || b.cap;
+      if (uid && U[uid]) {
+        const u = U[uid], marks = mine.get(uid) || [], under = [];
+        const pcs = pieces(uid, L, language, false);
+        let text = pcs.map((p, i) => {
+          const atom = p.tok && p.tok.a && A[p.tok.a];
+          const value = atom && /<img\b/i.test(atom.html || '') ? htmlMarkdown(atom.html) : piecesText([p]);
+          return value + (i < pcs.length - 1 && (p.gap || p.tok.s || pcs[i + 1].gap) ? ' ' : '');
+        }).join('').trim();
         for (const n of marks) {
-          const a = n.anchor, ex = kindOf(n) === 'hl' && (a.shown ? L <= 2 && shownAt(a) && flat(a.shown.exact) : L >= 3 && flat(a.quote && a.quote.exact)), at = ex ? text.indexOf(ex) : -1;
+          const a = n.anchor, ex = kindOf(n) === 'hl' && a.lang === language && (a.shown ? L <= 2 && flat(a.shown.exact) : L >= 3 && flat(a.quote && a.quote.exact)), at = ex ? text.indexOf(ex) : -1;
           if (at >= 0) text = `${text.slice(0, at)}==${ex}==${text.slice(at + ex.length)}`; else under.push(n);
         }
-        if (!text && !under.length) continue;
         const bullet = L <= 2 || u.role === 'item';
         if (text) {
-          if (!bullet && list) out.push('');
           out.push(bullet ? `${L > 2 && u.marker && /\d/.test(u.marker) ? u.marker : '-'} ${text}` : u.role === 'caption' ? `*${text}*` : text);
-          if (!bullet) out.push('');
-          list = bullet;
+          out.push('');
         }
-        if (under.length) { if (list) out.push(''); list = false; for (const n of under) out.push(...noteMd(n, false)); }
+        for (const n of under) out.push(...noteMd(n, false));
       }
-      if (list) out.push('');
     }
     out.push('---', '', `*Made with [${BRAND}](${REPO})*`, '');
     return out.join('\n').replace(/\n{3,}/g, '\n\n');
   }
+  const exportLanguage = (code) => ({ zh: 'CN', 'zh-Hant': 'TW' }[code] || code.toUpperCase());
+  const exportLevel = (n) => LEVEL_NAMES[n][0].toUpperCase() + LEVEL_NAMES[n].slice(1);
+
+  // Store ZIP entries without compression, so this also works in standalone saved pages.
+  function zipFiles(files) {
+    const encoder = new TextEncoder(), parts = [], central = [];
+    let offset = 0, directorySize = 0;
+    const header = (size) => new DataView(new ArrayBuffer(size));
+    const crc32 = (bytes) => {
+      let crc = 0xffffffff;
+      for (const byte of bytes) {
+        crc ^= byte;
+        for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+      }
+      return (crc ^ 0xffffffff) >>> 0;
+    };
+    for (const [name, value] of files) {
+      const path = encoder.encode(name), bytes = typeof value === 'string' ? encoder.encode(value) : value;
+      const crc = crc32(bytes), local = header(30), entry = header(46);
+      if (offset + bytes.length + path.length + 30 > 0xffffffff) throw new Error('ZIP exceeds 4 GB');
+      local.setUint32(0, 0x04034b50, true);
+      local.setUint16(4, 20, true);
+      local.setUint16(6, 0x800, true);
+      local.setUint16(12, 33, true);
+      local.setUint32(14, crc, true);
+      local.setUint32(18, bytes.length, true);
+      local.setUint32(22, bytes.length, true);
+      local.setUint16(26, path.length, true);
+      entry.setUint32(0, 0x02014b50, true);
+      entry.setUint16(4, 20, true);
+      entry.setUint16(6, 20, true);
+      entry.setUint16(8, 0x800, true);
+      entry.setUint16(14, 33, true);
+      entry.setUint32(16, crc, true);
+      entry.setUint32(20, bytes.length, true);
+      entry.setUint32(24, bytes.length, true);
+      entry.setUint16(28, path.length, true);
+      entry.setUint32(42, offset, true);
+      parts.push(local.buffer, path, bytes);
+      central.push(entry.buffer, path);
+      offset += 30 + path.length + bytes.length;
+      directorySize += 46 + path.length;
+    }
+    const end = header(22);
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, files.size, true);
+    end.setUint16(10, files.size, true);
+    end.setUint32(12, directorySize, true);
+    end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, end.buffer], { type: 'application/zip' });
+  }
+
+  async function markdownZip(kinds, levels, languages) {
+    working();
+    const files = new Map([['img/', new Uint8Array()]]), images = new Map();
+    const image = (source, alt) => {
+      if (!source) return '';
+      const url = new URL(source, document.baseURI).href;
+      if (!images.has(url)) images.set(url, { path: `img/image-${String(images.size + 1).padStart(3, '0')}` });
+      const path = images.get(url).path;
+      return `![${String(alt || '').replace(/[\\\[\]]/g, '\\$&')}](<${path}>)`;
+    };
+    const htmlMarkdown = (html) => {
+      const root = document.createElement('template');
+      root.innerHTML = html;
+      const convert = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'img') return image(node.getAttribute('src'), node.getAttribute('alt'));
+        if (tag === 'svg') return image(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(node))}`, node.getAttribute('aria-label'));
+        if (tag === 'math') return `$${texOf(node) || node.textContent}$`;
+        if (node.matches('.katex')) return `$${texOf(node)}$`;
+        if (tag === 'script' || tag === 'style') return '';
+        const content = [...node.childNodes].map(convert).join('');
+        if (tag === 'a') return `[${content}](<${node.getAttribute('href') || ''}>)`;
+        if (tag === 'br') return '\n';
+        if (tag === 'pre') return `\n\n\`\`\`\n${node.textContent}\n\`\`\`\n\n`;
+        if (tag === 'code') return `\`${content}\``;
+        if (tag === 'strong' || tag === 'b') return `**${content}**`;
+        if (tag === 'em' || tag === 'i') return `*${content}*`;
+        if (tag === 'table') {
+          const rows = [...node.querySelectorAll('tr')].map((row) => [...row.children].map((cell) => [...cell.childNodes].map(convert).join('').trim().replace(/\|/g, '\\|').replace(/\n/g, '<br>')));
+          const width = Math.max(0, ...rows.map((row) => row.length));
+          if (!width) return '';
+          const line = (row) => `| ${Array.from({ length: width }, (_, i) => row[i] || '').join(' | ')} |`;
+          return '\n\n' + [line(rows[0]), line(Array(width).fill('---')), ...rows.slice(1).map(line)].join('\n') + '\n\n';
+        }
+        return /^(p|div|figure|section|tr|li)$/.test(tag) ? `\n${content}\n` : content;
+      };
+      return [...root.content.childNodes].map(convert).join('').trim();
+    };
+    for (const language of languages) for (const L of levels) {
+      files.set(`source-${exportLevel(L)}-${exportLanguage(language)}.md`, docMarkdown(kinds, L, language, htmlMarkdown));
+    }
+    // Fetch every referenced picture before offering a complete archive. Any failed image keeps the dialog open.
+    for (const [url, item] of images) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${T[ui].sv_image_failed} (${response.status})`);
+      const blob = await response.blob();
+      const mime = blob.type.split(';')[0];
+      const ext = ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/tiff': 'tif' })[mime]
+        || (/\.(png|jpe?g|gif|webp|svg|avif|bmp|tiff?)(?:[?#]|$)/i.exec(url) || [])[1] || 'img';
+      const path = `${item.path}.${ext}`;
+      files.set(path, new Uint8Array(await blob.arrayBuffer()));
+      for (const [name, value] of files) if (name.endsWith('.md')) files.set(name, value.split(`<${item.path}>`).join(`<${path}>`));
+    }
+    return zipFiles(files);
+  }
+
   // PDF of the paper as it stands: the level being read (with the paragraphs opened in place), the highlights, and
   // the notes and conversations under their paragraphs; a line naming the level on top, the TextFold mark at the
   // end. ⌘P prints the same. Every paragraph is drawn at this level first (far ones are otherwise drawn later).
@@ -3426,7 +3541,7 @@
   const svdlg = h('dialog', 'svdlg');
   document.body.append(svdlg);
   const SV_KEY = 'textfold.save';
-  const sv = { what: 'whole', kinds: ['hl', 'note', 'ask'], fmt: 'html', langs: 'current', para: false, pdf: true,
+  const sv = { what: 'whole', kinds: ['hl', 'note', 'ask'], fmt: 'html', langs: 'current', mdLevels: [4, 3, 2, 1, 0], mdLangs: null, para: false, pdf: true,
     ...(() => { try { return JSON.parse(store.get(SV_KEY) || 'null'); } catch { return null; } })() };
   const fileName = () => `${D.meta.id} ${D.meta.title}`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 90).trim();
   function openSave() {
@@ -3436,17 +3551,21 @@
   }
   function renderSave(err) {
     const t = T[ui], counts = { hl: 0, note: 0, ask: 0 };
+    sv.mdLevels = Array.isArray(sv.mdLevels) ? [4, 3, 2, 1, 0].filter((n) => sv.mdLevels.includes(n)) : [level];
+    sv.mdLangs = Array.isArray(sv.mdLangs) ? AVAIL.filter((code) => sv.mdLangs.includes(code)) : [lang];
     for (const n of notes) if (shown(n.anchor)) counts[kindOf(n)]++;
     const total = counts.hl + counts.note + counts.ask;
     if (!total && sv.what === 'marks') sv.what = 'whole';
     const fmts = sv.what === 'whole' ? [...(D.app ? ['html'] : []), 'pdf', 'md'] : ['html', 'pdf', 'md', 'json'];   // (a page that is a file already prints)
     if (!fmts.includes(sv.fmt)) sv.fmt = fmts[0];
-    const fmtName = { html: t.sv_html, pdf: sv.what === 'whole' ? t.sv_pdf_level.replace('{level}', t.levels[level]) : t.sv_pdf, md: sv.what === 'whole' ? t.sv_md_level.replace('{level}', t.levels[level]) : t.sv_md, json: t.sv_json };
+    const fmtName = { html: t.sv_html, pdf: sv.what === 'whole' ? t.sv_pdf_level.replace('{level}', t.levels[level]) : t.sv_pdf, md: sv.what === 'whole' ? t.sv_md_zip : t.sv_md, json: t.sv_json };
     const radio = (name, value, label, sub, off) => `<label class="sv-opt${off ? ' off' : ''}"><input type="radio" name="${name}" value="${value}"` +
       `${sv[name] === value ? ' checked' : ''}${off ? ' disabled' : ''}><span><b>${esc(label)}</b>${sub ? `<em>${esc(sub)}</em>` : ''}</span></label>`;
     const box = (k, label) => `<label class="sv-box${counts[k] ? '' : ' off'}"><input type="checkbox" name="kind" value="${k}"` +
       `${sv.kinds.includes(k) && counts[k] ? ' checked' : ''}${counts[k] ? '' : ' disabled'}><span>${esc(label)}</span><i>${counts[k]}</i></label>`;
     const langs = sv.what === 'whole' && sv.fmt === 'html' && AVAIL.length > 1;
+    const md = sv.what === 'whole' && sv.fmt === 'md';
+    const choice = (name, value, label, checked) => `<label class="sv-box"><input type="checkbox" name="${name}" value="${value}"${checked ? ' checked' : ''}><span>${esc(label)}</span></label>`;
     const picked = sv.kinds.filter((k) => counts[k]).length;
     const para = sv.what === 'marks' && sv.fmt !== 'json'   // each mark in its paragraph: easier to read than the words alone
       ? `<label class="sv-box sv-para"><input type="checkbox" name="para"${sv.para ? ' checked' : ''}><span>${esc(t.sv_para)}</span></label>`
@@ -3457,10 +3576,12 @@
       <div class="sv-row"><div class="sv-l">${esc(t.sv_what)}</div><div class="sv-opts">${radio('what', 'whole', t.sv_whole, t.sv_whole_d)}${radio('what', 'marks', t.sv_marks, t.sv_marks_d, !total)}</div></div>
       <div class="sv-row"><div class="sv-l">${esc(t.sv_incl)}</div><div class="sv-boxes">${box('hl', t.sv_hl)}${box('note', t.sv_notes)}${box('ask', t.sv_asks)}${para}</div></div>
       <div class="sv-row"><div class="sv-l">${esc(t.sv_fmt)}</div><div class="sv-opts sv-fmts">${fmts.map((f) => radio('fmt', f, fmtName[f])).join('')}</div></div>
+      ${md ? `<div class="sv-row"><div class="sv-l">${esc(t.sv_levels)}</div><div class="sv-boxes">${[4, 3, 2, 1, 0].map((n) => choice('mdLevel', n, t.levels[n], sv.mdLevels.includes(n))).join('')}</div></div>
+      <div class="sv-row"><div class="sv-l">${esc(t.sv_langs)}</div><div class="sv-boxes">${AVAIL.map((code) => choice('mdLang', code, nameOf(code), sv.mdLangs.includes(code))).join('')}</div></div>` : ''}
       ${langs ? `<div class="sv-row"><div class="sv-l">${esc(t.sv_langs)}</div><div class="sv-opts sv-fmts">${radio('langs', 'current', t.sv_lang_cur.replace('{lang}', nameOf(lang)))}${radio('langs', 'all', t.sv_lang_all.replace('{n}', AVAIL.length))}</div></div>` : ''}
       <p class="sv-lic">${esc(t.sv_lic)}</p>
       ${err ? `<p class="sv-err">${esc(err)}</p>` : ''}
-      <div class="sv-acts"><button type="button" class="sv-cancel">${esc(t.cancel)}</button><button type="submit" class="sv-go"${sv.what === 'marks' && !picked ? ' disabled' : ''}>${esc(t.sv_go)}</button></div>
+      <div class="sv-acts"><button type="button" class="sv-cancel">${esc(t.cancel)}</button><button type="submit" class="sv-go"${(sv.what === 'marks' && !picked) || (md && (!sv.mdLevels.length || !sv.mdLangs.length)) ? ' disabled' : ''}>${esc(t.sv_go)}</button></div>
     </form>`;
   }
   svdlg.addEventListener('change', (e) => {
@@ -3469,6 +3590,8 @@
     sv.what = f.elements.what.value;
     sv.fmt = f.elements.fmt.value;
     if (f.elements.langs) sv.langs = f.elements.langs.value;
+    if (f.querySelector('[name="mdLevel"]')) sv.mdLevels = [...f.querySelectorAll('[name="mdLevel"]:checked')].map((x) => Number(x.value));
+    if (f.querySelector('[name="mdLang"]')) sv.mdLangs = [...f.querySelectorAll('[name="mdLang"]:checked')].map((x) => x.value);
     sv.kinds = [...new Set([...[...f.querySelectorAll('input[name="kind"]:checked')].map((x) => x.value), ...off])];
     if (f.elements.para) sv.para = f.elements.para.checked;
     if (f.elements.pdf) sv.pdf = f.elements.pdf.checked;
@@ -3508,6 +3631,7 @@
   }
   // while a file is made (seconds, for a whole text with its PDF): the mark folding and unfolding, in place of the buttons
   function working() {
+    svdlg.querySelectorAll('input').forEach((input) => { input.disabled = true; });
     const acts = svdlg.querySelector('.sv-acts');
     if (acts) acts.innerHTML = `<div class="sv-busy" role="status"><svg viewBox="0 0 20 20" aria-hidden="true"><rect class="b1" x="2" y="3" width="16" height="2.4" rx="1.2"/>` +
       `<rect class="b2" x="2" y="8.8" width="11" height="2.4" rx="1.2"/><rect class="b3" x="2" y="14.6" width="5" height="2.4" rx="1.2"/></svg><span>${esc(T[ui].sv_working)}</span></div>`;
@@ -3520,7 +3644,9 @@
       return;
     }
     const whole = sv.what === 'whole';
-    const [file, type, make] = whole && sv.fmt === 'md' ? [`${name} (${t.levels[level]}).md`, 'text/markdown', () => docMarkdown(kinds)]
+    if (whole && sv.fmt === 'md' && (!sv.mdLevels.length || !sv.mdLangs.length)) return renderSave(t.sv_md_pick);
+    const levels = [...sv.mdLevels], languages = [...sv.mdLangs];
+    const [file, type, make] = whole && sv.fmt === 'md' ? [`${name}.zip`, 'application/zip', () => markdownZip(kinds, levels, languages)]
       : whole ? [`${name}.html`, 'text/html', async () => {   // made by the server: the levels, the languages, the notes chosen
         working();
         const r = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' },
