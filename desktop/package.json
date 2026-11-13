@@ -1,7 +1,7 @@
 {
   "name": "textfold-desktop",
   "private": true,
-  "version": "0.10.51",
+  "version": "0.10.52",
   "description": "TextFold as an app: the local server and the reader in one window",
   "license": "Apache-2.0",
   "author": "Xia Chen",
@@ -9,7 +9,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test links.test.js",
+    "test": "node --test links.test.js save-file.test.js",
     "payload": "node scripts/prepare-payload.mjs",
     "dist:mac": "node scripts/prepare-payload.mjs darwin arm64 && electron-builder --mac dmg --arm64 --publish never",
     "dist:mac:x64": "node scripts/prepare-payload.mjs darwin x64 && electron-builder --mac dmg --x64 --publish never",

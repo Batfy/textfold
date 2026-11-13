@@ -236,7 +236,7 @@ async function open() {
 ipcMain.handle('open-external', (_e, url) => (/^https?:/.test(url) ? shell.openExternal(url) : null));
 // a file the reader saves (a page, its notes, a figure's picture): where it goes, they choose in the system's own
 // dialog; the path, or null. A page is text, a picture its bytes
-const KINDS = { html: 'Web page', md: 'Markdown', json: 'JSON', png: 'PNG image', jpg: 'JPEG image', gif: 'GIF image', webp: 'WebP image', svg: 'SVG image' };
+const KINDS = { html: 'Web page', md: 'Markdown', zip: 'ZIP archive', json: 'JSON', png: 'PNG image', jpg: 'JPEG image', gif: 'GIF image', webp: 'WebP image', svg: 'SVG image' };
 ipcMain.handle('save-file', async (e, name, data) => {
   const ext = path.extname(String(name)).slice(1).toLowerCase();
   if (!KINDS[ext]) return null;

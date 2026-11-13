@@ -46,7 +46,7 @@ class Links(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node is not on the PATH")
     def test_in_node(self):
-        r = subprocess.run(["node", "--test", "links.test.js"], cwd=LINKS.parent, capture_output=True, text=True,
+        r = subprocess.run(["node", "--test", "links.test.js", "save-file.test.js"], cwd=LINKS.parent, capture_output=True, text=True,
                            encoding="utf-8", timeout=60)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
