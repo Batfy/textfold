@@ -1814,6 +1814,16 @@
       const asked = data.models.find((m) => m.id === (data.askModel || data.selected)), efforts = (asked && asked.efforts) || [];
       const effort = efforts.length ? `<select class="st-effort" aria-label="${esc(t.st_effort)}" title="${esc(t.st_effort)}"><option value="">${esc(t.eff_auto)}</option>${efforts.map((e) =>
         `<option value="${esc(e)}"${e === data.askEffort ? ' selected' : ''}>${esc(t[`eff_${e}`] || e)}</option>`).join('')}</select>` : '';
+      const generated = data.models.find((m) => m.id === data.selected);
+      const speed = (model, task, value, label) => model?.codexSpeed
+        ? `<select class="st-speed" data-speed="${task}" aria-label="${esc(`${label} · ${t.st_speed}`)}" title="${esc(t.st_speed)}">` +
+          `<option value="default">${esc(t.speed_normal)}</option><option value="fast"${value === 'fast' ? ' selected' : ''}>1.5×</option></select>`
+        : '';
+      const genSpeed = speed(generated, 'gen', data.genSpeed, t.st_gen);
+      const askSpeed = speed(asked, 'ask', data.askSpeed, t.st_ask);
+      const askOptions = effort || askSpeed
+        ? `<div class="st-model-options${effort && askSpeed ? ' both' : ''}">${effort}${askSpeed}</div>`
+        : '';
       const testBtn = (k) => {
         const r = tests[k];
         return `<button type="button" class="st-btn st-testbtn${r ? (r.ok ? ' ok' : ' bad') : ''}" data-test="${k}">${r ? (r.ok ? `✓ ${r.seconds} s` : `✕ ${esc(t.test_bad)}`) : esc(t.test)}</button>`;
@@ -1821,8 +1831,8 @@
       const failed = ['gen', 'ask'].filter((k) => tests[k] && !tests[k].ok)
         .map((k) => `<p class="st-models-err">${esc(k === 'gen' ? t.st_gen : t.st_ask)}: ${esc(tests[k].error || '')}</p>`).join('');
       return `<div class="st-models">` +
-        `<label for="st-gen">${esc(t.st_gen)}</label><select name="model" id="st-gen" class="st-model wide">${opts(data.selected)}</select>${testBtn('gen')}` +
-        `<label for="st-ask">${esc(t.st_ask)}</label><select id="st-ask" class="st-askmodel${effort ? '' : ' wide'}"><option value="">${esc(t.st_same)}</option>${opts(data.askModel)}</select>${effort}${testBtn('ask')}` +
+        `<label for="st-gen">${esc(t.st_gen)}</label><select name="model" id="st-gen" class="st-model${genSpeed ? '' : ' wide'}">${opts(data.selected)}</select>${genSpeed}${testBtn('gen')}` +
+        `<label for="st-ask">${esc(t.st_ask)}</label><select id="st-ask" class="st-askmodel${askOptions ? '' : ' wide'}${effort && askSpeed ? ' split' : ''}"><option value="">${esc(t.st_same)}</option>${opts(data.askModel)}</select>${askOptions}${testBtn('ask')}` +
         `</div>${failed}`;
     }
 
@@ -2072,6 +2082,13 @@
       const askSel = q('.st-askmodel'), effSel = q('.st-effort');
       if (askSel) askSel.onchange = async () => { delete tests.ask; update(await api('/api/models/select', { task: 'ask', model: askSel.value || null, effort: null })); };
       if (effSel) effSel.onchange = async () => { delete tests.ask; update(await api('/api/models/select', { task: 'ask', model: data.askModel || null, effort: effSel.value || null })); };
+      dlg.querySelectorAll('.st-speed').forEach((speed) => {
+        speed.onchange = async () => {
+          const task = speed.dataset.speed;
+          delete tests[task];
+          update(await api('/api/models/select', { task, speed: speed.value }));
+        };
+      });
       dlg.querySelectorAll('.st-testbtn').forEach((tb) => {
         tb.onclick = async () => {
           const k = tb.dataset.test;

@@ -594,6 +594,15 @@ window.DR_I18N = (() => {
       ['स्वचालित', 'बंद', 'न्यूनतम', 'कम', 'मध्यम', 'ऊँचा', 'बहुत ऊँचा', 'अधिकतम', 'अल्ट्रा']]),
   };
   for (const [code, words] of Object.entries(M)) Object.assign(S[code], words);
+  const SPEED = {
+    en: ['Speed', 'Normal'], zh: ['速度', '正常'], 'zh-Hant': ['速度', '正常'],
+    ja: ['速度', '標準'], ko: ['속도', '보통'], es: ['Velocidad', 'Normal'],
+    fr: ['Vitesse', 'Normale'], de: ['Geschwindigkeit', 'Normal'], pt: ['Velocidade', 'Normal'],
+    it: ['Velocità', 'Normale'], ru: ['Скорость', 'Обычная'], hi: ['गति', 'सामान्य'],
+  };
+  for (const [code, [speed, normal]] of Object.entries(SPEED)) {
+    Object.assign(S[code], { st_speed: speed, speed_normal: normal });
+  }
   // several files at once (app.js, addFiles): the upload under way, what came of them, why one was not taken
   const fls = (w) => ({ fl_adding: w[0], fl_added: w[1], fl_queue: w[2], fl_engine: w[3], fl_skipped: w[4], fl_no_model: w[5], fl_read: w[6] });
   const FL = {

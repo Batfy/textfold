@@ -28,8 +28,8 @@
                               ·  POST {seen}: the reader told of that release
   GET  /api/langs             the languages a text can be read in: [{code, name}], each by its own name (langs.py)
   POST /api/models/refresh    refresh local model services in the background; GET /api/models reports progress/errors
-  POST /api/models/select     {model, effort}: the model generations use; {task: "ask", model, effort}: the one questions
-                              are answered with (none: the same) and its reasoning level (none: the default)
+  POST /api/models/select     update model settings for generation or, with task: "ask", for questions.
+                              speed: "default" or "fast" for Codex; ask effort: null for the default.
   POST /api/agents/scan       look for agents again (also done at startup)
   POST /api/agents/probe      {command, protocol?}: a custom agent's program, version, the agent it speaks as, its models
   POST /api/agents/save       {key?, name, command, protocol, models: [{id, name?, efforts?}]}  ·  POST /api/agents/remove {key}
@@ -131,6 +131,7 @@ def vendor_file(rel):
 DISCOVERY = {"live": {"ollama": [], "bridge": None}, "bridge": {"running": False, "node": bool(shutil.which("npx"))},
              "refreshing": False, "ready": False, "error": ""}
 DISCOVERY_LOCK = threading.Lock()
+MODEL_SELECTION_LOCK = threading.Lock()
 
 
 def refresh_models():
@@ -181,6 +182,7 @@ def models_payload():
     return {
         "models": cat, "selected": selected, "selectedName": name(selected),
         "askModel": ask, "askEffort": ask_effort, "askName": name(ask) if ask and ask != selected else "",
+        "genSpeed": models.codex_speed(s, "gen"), "askSpeed": models.codex_speed(s, "ask"),
         "efforts": s.get("efforts") or {}, "bridge": discovery["bridge"],
         "discovery": {k: discovery[k] for k in ("refreshing", "ready", "error")},
         "agents": [{k: a[k] for k in ("runtime", "label", "binary", "path", "version", "runnable", "error")} | {"models": len(a["models"])}
@@ -803,6 +805,26 @@ def make_handler(jobs):
                 if size > 12_000_000:   # a Markdown file is far smaller; this is a request gone wrong
                     return self.json({"error": "too-large"}, 413)
                 body = json.loads(self.rfile.read(size) or b"{}")
+                if u.path == "/api/models/select":
+                    ask = body.get("task") == "ask"
+                    if "speed" in body and body["speed"] not in models.CODEX_SPEEDS:
+                        return self.json({"error": "invalid Codex speed"}, 400)
+                    with MODEL_SELECTION_LOCK:
+                        s = models.load_settings()
+                        if "speed" in body:
+                            s["ask_speed" if ask else "gen_speed"] = body["speed"]
+                        if "model" in body:
+                            s["ask_model" if ask else "model"] = body["model"] or None
+                        if ask and ("effort" in body or "model" in body):
+                            s["ask_effort"] = body.get("effort") or None
+                        elif not ask and "effort" in body and s["model"]:
+                            if body["effort"]:
+                                s["efforts"][s["model"]] = body["effort"]
+                            else:
+                                s["efforts"].pop(s["model"], None)
+                        models.save_settings(s)
+                        result = models_payload()
+                    return self.json(result)
                 s = models.load_settings()
                 if u.path == "/api/storage":
                     try:
@@ -1038,20 +1060,6 @@ def make_handler(jobs):
                         return self.json({"error": str(e)}, 400)
                     except Exception as e:  # the model failed: the note keeps its question, the reader can ask again
                         return self.json({"error": str(e)[:600]}, 502)
-                if u.path == "/api/models/select" and body.get("task") == "ask":
-                    s["ask_model"] = body.get("model") or None
-                    s["ask_effort"] = body.get("effort") or None
-                    models.save_settings(s)
-                    return self.json(models_payload())
-                if u.path == "/api/models/select":
-                    s["model"] = body.get("model") or None
-                    if "effort" in body and s["model"]:
-                        if body["effort"]:
-                            s["efforts"][s["model"]] = body["effort"]
-                        else:
-                            s["efforts"].pop(s["model"], None)
-                    models.save_settings(s)
-                    return self.json(models_payload())
                 if u.path == "/api/models/refresh":
                     refresh_models()
                     return self.json(models_payload())

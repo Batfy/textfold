@@ -766,7 +766,7 @@ def custom_models(rows):
     if os.environ.get("TEXTFOLD_NO_MODELS"):   # (as scan: none, in a test server or a CI run)
         return []
     return [{"id": f"{CUSTOM}{a['key']}/{m['id']}", "name": f"{a['name']} · {m.get('name') or m['id']}", "runtime": CUSTOM + a["key"],
-             "model": m["id"], "efforts": m.get("efforts") or [], "defaultEffort": None}
+             "model": m["id"], "protocol": a["protocol"], "efforts": m.get("efforts") or [], "defaultEffort": None}
             for a in rows or [] if a.get("protocol") in PROTOCOLS for m in a.get("models") or [] if m.get("id")]
 
 
@@ -803,7 +803,7 @@ def parse_json(text, schema=None):
     raise RuntimeError("no JSON in reply" if "{" not in text else "the reply's JSON does not parse")
 
 
-def run_codex(model, prompt, schema, system, effort, timeout, tools=False, cmd=None):
+def run_codex(model, prompt, schema, system, effort, timeout, tools=False, cmd=None, *, speed=None):
     """(cmd: the command that starts it, a custom agent's; else the Codex found here)"""
     if cmd is None:
         path = path_of("codex")
@@ -816,6 +816,10 @@ def run_codex(model, prompt, schema, system, effort, timeout, tools=False, cmd=N
         # (tools: its web search too; the sandbox stays read-only)
         args = [*cmd, *(["--search"] if tools else []), "exec", *CODEX_LEAN, "--ephemeral", "--skip-git-repo-check", "-s", "read-only",
                 "-m", model, "--output-schema", str(sf), "-o", str(of)]
+        if speed:
+            args += ["-c", f"service_tier={json.dumps(speed)}"]
+        if speed == "fast":
+            args += ["-c", "features.fast_mode=true"]
         # off is "none" (gpt-5.5 takes it, and refuses "minimal"); a model that refuses "none" runs at "low"
         for level in (["none", "low"] if effort == "off" else [effort]):
             of.unlink(missing_ok=True)

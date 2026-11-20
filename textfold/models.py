@@ -21,6 +21,7 @@ SETTINGS = HOME / "settings.json"
 TASKS = ("ladder", "links", "translate", "ask")
 LEVELS = ("default", "off", "low", "medium", "high")
 DEFAULT_THINKING = {"ladder": "off", "links": "low", "translate": "off", "ask": "low"}
+CODEX_SPEEDS = ("default", "fast")
 LEGACY_ALIASES = {"fable", "opus", "sonnet", "haiku"}
 # the Anthropic API spoken natively (official SDK), offered as one more preset in the settings
 ANTHROPIC_PRESET = {"id": "anthropic", "name": "Anthropic", "base": "https://api.anthropic.com", "protocol": "anthropic",
@@ -28,7 +29,8 @@ ANTHROPIC_PRESET = {"id": "anthropic", "name": "Anthropic", "base": "https://api
 
 
 def load_settings():
-    s = {"model": None, "ask_model": None, "ask_effort": None, "efforts": {}, "providers": [], "custom_agents": [], "use_thoughtdag_env": False,
+    s = {"model": None, "ask_model": None, "ask_effort": None, "gen_speed": "default", "ask_speed": "default",
+         "efforts": {}, "providers": [], "custom_agents": [], "use_thoughtdag_env": False,
          "pdf_tier": "fast", "pdf_online": True, "engine_path": None, "zotero": {},
          "lang": None}   # the reader's language as the page last told it (the page keeps its own: pf-ui-lang), for other programs
     old_home = next((h for h in OLD_HOMES if (h / "settings.json").exists()), None)
@@ -88,6 +90,7 @@ def catalog(s=None, live=None):
     out, seen = [], set()
     for m in agents.models() + agents.custom_models(s.get("custom_agents")):
         out.append({"id": m["id"], "name": m["name"], "kind": "agent", "group": m["runtime"],
+                    "codexSpeed": m.get("protocol", m["runtime"]) == "codex",
                     "efforts": m.get("efforts") or [], "defaultEffort": m.get("defaultEffort")})
         seen.add(m["id"])
     provs = provider_list(s, live)
@@ -112,7 +115,12 @@ def default_model(s=None, cat=None):
     return ids[0] if ids else None
 
 
-def resolve(model_id=None, s=None):
+def codex_speed(s, task):
+    speed = s.get(f"{task}_speed")
+    return speed if speed in CODEX_SPEEDS else "default"
+
+
+def resolve(model_id=None, s=None, *, task="gen"):
     """A model id to what it takes to call it."""
     s = s or load_settings()
     if not model_id:
@@ -128,14 +136,16 @@ def resolve(model_id=None, s=None):
         if a and model and a.get("protocol") in agents.PROTOCOLS:
             # (runtime "custom", not the agent it speaks as: llm.call keys its cache by the whole id, never by
             # Claude Code's bare model name, so its replies are never taken for Claude Code's own)
-            return {"id": model_id, "kind": "agent", "runtime": "custom", "protocol": a["protocol"], "command": a["command"],
+            spec = {"id": model_id, "kind": "agent", "runtime": "custom", "protocol": a["protocol"], "command": a["command"],
                     "agent": a.get("name") or key, "model": model, "effort": effort}
+            return {**spec, "speed": codex_speed(s, task)} if a["protocol"] == "codex" else spec
         raise RuntimeError(f"Model {model_id} is not available (its custom agent is gone)")
     rt = agents.runtime_of(model_id)
     if rt:
         rest = model_id[len(agents.PREFIX[rt]):]
         model = rest.split("/", 1)[1] if rt in ("claude-code", "codex", "codebuddy") else rest  # pi keeps provider/model
-        return {"id": model_id, "kind": "agent", "runtime": rt, "model": model, "effort": effort}
+        spec = {"id": model_id, "kind": "agent", "runtime": rt, "model": model, "effort": effort}
+        return {**spec, "speed": codex_speed(s, task)} if rt == "codex" else spec
     for p in provider_list(s):
         if any(m["id"] == model_id for m in p["models"]):
             return {"id": model_id, "kind": "api", "protocol": p["protocol"], "base": p["base"], "api_key": p["api_key"],
@@ -168,7 +178,7 @@ def ask_spec(s=None, tools=False):
     model, more reasoning), else the one the levels are written with, at the questions' default (DEFAULT_THINKING)."""
     s = s or load_settings()
     model_id, effort = ask_choice(s)
-    spec = resolve(model_id, s)
+    spec = resolve(model_id, s, task="ask")
     spec = {**spec, "effort": effort} if effort else for_task(spec, "ask", s)
     # tools: an agent on this computer looks it up on the web with its own tools, as the reader asked beside the question
     # (agents.py); a service has none
