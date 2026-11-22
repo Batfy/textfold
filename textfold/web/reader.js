@@ -3769,7 +3769,7 @@ math { font-size: 1.05em; }
     if (!chat.hidden) openChat(chatNote);
   }
 
-  // ── beside the original pages: the paper's PDF at the left (fetched once by the app, from arXiv or PubMed Central),
+  // ── beside the original pages: the paper's PDF (fetched once by the app, from arXiv or PubMed Central),
   //    each paragraph found on it by its own words (the paper's language, whatever language it is read in). A click
   //    on a paragraph shows where it is on its page; reading on carries the pages along; a click on a page goes to its
   //    paragraph ──
@@ -3777,7 +3777,9 @@ math { font-size: 1.05em; }
     || !!(D.pdf && D.pdfjs)   // a saved page that carries its PDF, and PDF.js to show it
     || !!D.pdfAt;   // a gallery's page: the PDF and PDF.js beside it, on the same host
   const CMP_KEY = 'pf-compare';
-  // the pane's width: dragged at its right edge (or with the arrow keys there) and kept for next time, the reader's place
+  const PDF_SIDE = 'textfold.pdfside';
+  let pdfOnRight = store.get(PDF_SIDE) === 'right';
+  // the pane's width: dragged at the divider (or with the arrow keys there) and kept for next time, the reader's place
   // held while the text reflows beside it; a double-click goes back to the default (46% of the window, at most 860 px)
   const PDFW = 'textfold.pdfw';
   const keptWidth = () => { try { return +localStorage.getItem(PDFW) || 0; } catch { return 0; } };
@@ -3798,11 +3800,12 @@ math { font-size: 1.05em; }
       e.preventDefault();
       grip.setPointerCapture(e.pointerId);
       document.documentElement.classList.add('pp-resizing');
-      const keep = unitAtReading(), top = keep && keep.getBoundingClientRect().top, left = pane.getBoundingClientRect().left;
+      const keep = unitAtReading(), top = keep && keep.getBoundingClientRect().top;
+      const startX = e.clientX, startWidth = pane.getBoundingClientRect().width, direction = pdfOnRight ? -1 : 1;
       let x = null, frame = 0;
       const apply = () => {
         frame = 0;
-        setPdfWidth(x - left);
+        setPdfWidth(startWidth + (x - startX) * direction);
         if (cmp && cmp.pages.length) sizePages();   // (the pages stretch until the drag ends, then are drawn again)
         if (keep && keep.isConnected) scrollBy(0, keep.getBoundingClientRect().top - top);
       };
@@ -3826,7 +3829,8 @@ math { font-size: 1.05em; }
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault();
       const keep = unitAtReading();
-      setPdfWidth(pane.getBoundingClientRect().width + (e.key === 'ArrowLeft' ? -24 : 24));
+      const delta = e.key === 'ArrowLeft' ? -24 : 24;
+      setPdfWidth(pane.getBoundingClientRect().width + (pdfOnRight ? -delta : delta));
       keepWidth(pane);
       reflowKeeping(keep);
     });
@@ -3843,6 +3847,11 @@ math { font-size: 1.05em; }
     cmpBtn.title = T[ui].compare_tip;
     cmpBtn.classList.toggle('on', !!cmp);
     cmpBtn.setAttribute('aria-pressed', cmp ? 'true' : 'false');
+    if (cmp) {
+      cmp.swap.title = T[ui].pp_swap;
+      cmp.swap.setAttribute('aria-label', T[ui].pp_swap);
+      cmp.swap.setAttribute('aria-pressed', String(pdfOnRight));
+    }
   }
   cmpLabel();
   cmpBtn.addEventListener('click', () => { if (cmp) closeCompare(); else openCompare(); });
@@ -3868,21 +3877,30 @@ math { font-size: 1.05em; }
     if (cmp || !PDF_OK) return;
     const keep = unitAtReading();
     const pane = h('aside', 'pdfpane'), bar = h('div', 'pp-bar'), title = h('span', 'pp-t'), count = h('span', 'pp-n');
-    const x = h('button', 'pp-x', '×'), scroller = h('div', 'pp-scroll');
+    const x = h('button', 'pp-x', '×'), swap = h('button', 'pp-swap', '⇄'), scroller = h('div', 'pp-scroll');
     const zo = h('button', 'pp-z', '−'), zl = h('button', 'pp-zl'), zi = h('button', 'pp-z', '+');
     for (const [b, t] of [[zo, T[ui].nb_zoom_out], [zl, T[ui].pp_fit], [zi, T[ui].nb_zoom_in]]) { b.type = 'button'; b.title = t; b.setAttribute('aria-label', t); }
     x.type = 'button';
+    swap.type = 'button';
     x.setAttribute('aria-label', T[ui].close);
     pane.setAttribute('aria-label', T[ui].compare_tip);
     const src = { pmc: 'PubMed Central', ppr: 'Preprint', biorxiv: 'bioRxiv', medrxiv: 'medRxiv' }[D.meta.id.match(/^[a-z]+/)?.[0]];
     const own = D.meta.id.startsWith('pdf-');   // a PDF read through the engine: the file itself, not one fetched for it
     title.textContent = own ? (D.meta.label || 'PDF') : src ? `${src} · PDF` : `arXiv · PDF ${D.meta.version || ''}`.trim();
-    bar.append(title, zo, zl, zi, count, x);
+    bar.append(title, zo, zl, zi, count, swap, x);
     pane.append(bar, scroller, gripFor(pane));
     if (keptWidth()) setPdfWidth(keptWidth());
     document.body.append(pane);
-    cmp = { pane, scroller, count, pages: [], words: [], grams: null, spans: new Map(), current: null, follow: null, epoch: 0, zoom: 1, zl };
+    cmp = { pane, scroller, count, swap, pages: [], words: [], grams: null, spans: new Map(), current: null, follow: null, epoch: 0, zoom: 1, zl };
     x.addEventListener('click', closeCompare);
+    swap.addEventListener('click', () => {
+      const keep = unitAtReading();
+      pdfOnRight = !pdfOnRight;
+      document.documentElement.classList.toggle('pdf-right', pdfOnRight);
+      store.set(PDF_SIDE, pdfOnRight ? 'right' : 'left');
+      cmpLabel();
+      reflowKeeping(keep);
+    });
     zo.addEventListener('click', () => zoomPdf(cmp.zoom / 1.25));
     zi.addEventListener('click', () => zoomPdf(cmp.zoom * 1.25));
     zl.addEventListener('click', () => zoomPdf(1));
@@ -3901,6 +3919,7 @@ math { font-size: 1.05em; }
     scroller.addEventListener('scroll', () => requestAnimationFrame(pageCount), { passive: true });
     scroller.addEventListener('click', onPageClick);
     document.documentElement.classList.add('compare');
+    document.documentElement.classList.toggle('pdf-right', pdfOnRight);
     try { localStorage.setItem(CMP_KEY, '1'); } catch { /* private window */ }
     cmpLabel();
     reflowKeeping(keep);
@@ -4003,7 +4022,7 @@ math { font-size: 1.05em; }
     if (cmp.loading) cmp.loading.destroy();   // the document and its worker
     cmp.pane.remove();
     cmp = null;
-    document.documentElement.classList.remove('compare');
+    document.documentElement.classList.remove('compare', 'pdf-right');
     document.documentElement.style.removeProperty('--pdfw');
     try { localStorage.setItem(CMP_KEY, '0'); } catch { /* private window */ }
     cmpLabel();

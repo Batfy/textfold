@@ -1000,30 +1000,35 @@ html.morphing .chatbtn { pointer-events: none; }
   .chunk > .side, .chunk > .lside { position: static; }
 }
 
-/* ── beside the original pages: the PDF at the left, the reader's column at the right ── */
+/* ── beside the original pages ── */
 .cmpbtn { order: 3; flex: none; font: 600 12.5px var(--sans); color: var(--ink-2); background: none; border: 1px solid var(--line); border-radius: 999px;
   padding: 4px 11px; cursor: pointer; }
 .cmpbtn:hover { border-color: var(--accent); color: var(--accent); }
 .cmpbtn.on { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
-html.compare { --pdfw: min(46vw, 860px); }
+html.compare { --pdfw: min(46vw, 860px); --compare-left: var(--pdfw); --compare-right: 0px; }
+html.compare.pdf-right { --compare-left: 0px; --compare-right: var(--pdfw); }
 /* (html.app.compare: over app.css's html.app rules, which come later) */
-html.compare body, html.app.compare body { padding-left: calc(var(--rail, 0px) + var(--pdfw)); }
-html.compare footer.zoom, html.app.compare footer.zoom { left: calc(var(--rail, 0px) + var(--pdfw)); }
+html.compare body, html.app.compare body { padding-left: calc(var(--rail, 0px) + var(--compare-left)); padding-right: var(--compare-right); }
+html.compare footer.zoom, html.app.compare footer.zoom { left: calc(var(--rail, 0px) + var(--compare-left)); right: var(--compare-right); }
+html.compare .chatbtn, html.compare .chat, html.compare .findbar { right: calc(20px + var(--compare-right)); }
 /* The PDF owns the split boundary when the reader moves past it. */
 .pdfpane { position: fixed; z-index: 21; top: 0; bottom: 0; left: var(--rail, 0px); width: var(--pdfw); display: flex; flex-direction: column;
   background: var(--line-2); border-right: 1px solid var(--line); font-family: var(--sans); }
+html.pdf-right .pdfpane { left: auto; right: 0; border-right: 0; border-left: 1px solid var(--line); }
 .pp-bar { display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 16px; font-size: 12.5px; font-weight: 550; color: var(--muted); }
 .pp-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-n { font-variant-numeric: tabular-nums; }
-.pp-x { width: 28px; height: 28px; border: 0; border-radius: 7px; background: none; font: 400 20px/1 var(--sans); color: var(--muted); cursor: pointer; }
-.pp-x:hover { background: var(--line); color: var(--ink); }
+.pp-x, .pp-swap { flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: none;
+  font: 400 20px/1 var(--sans); color: var(--muted); cursor: pointer; }
+.pp-x:hover, .pp-swap:hover { background: var(--line); color: var(--ink); }
 .pp-z, .pp-zl { height: 26px; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; font: 550 14px/1 var(--sans); }
 .pp-z { width: 26px; font-size: 17px; }
 .pp-zl { min-width: 46px; padding: 0 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .pp-z:hover, .pp-zl:hover { background: var(--line); color: var(--ink); }
 .pdfpane.zoomed .pp-scroll { align-items: flex-start; }   /* (wider than the pane: from its left edge, so all of it scrolls into view) */
-/* its width, at its right edge (reader.js, gripFor): as the sidebar's (app.css, .sb-resize) */
+/* the pane's resize handle at the divider, like the sidebar's (app.css, .sb-resize) */
 .pp-grip { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; touch-action: none; z-index: 1; }
+html.pdf-right .pp-grip { left: -4px; right: auto; }
 .pp-grip::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: var(--accent); opacity: 0; transition: opacity .15s; }
 .pp-grip:hover::after, .pp-grip:focus-visible::after, html.pp-resizing .pp-grip::after { opacity: .55; }
 .pp-grip:focus-visible { outline: none; }
@@ -1051,13 +1056,12 @@ html.compare .lk, html.compare .lside .ncard { width: auto; max-width: 100%; }
 html.compare .chunk > .side, html.compare .chunk > .lside { position: static; }
 @media (max-width: 1099px) {
   .cmpbtn, .pdfpane { display: none !important; }
-  html.compare body, html.app.compare body { padding-left: var(--rail, 0px); }
-  html.compare footer.zoom, html.app.compare footer.zoom { left: var(--rail, 0px); }
+  html.compare, html.compare.pdf-right { --compare-left: 0px; --compare-right: 0px; }
 }
 @media (prefers-reduced-motion: reduce) { .pp-mark.pick { animation: none; } }
 .accbtn { order: 3; }
 .accbtn:disabled { opacity: .5; cursor: default; }
-@media print { .pdfpane, .cmpbtn { display: none !important; } html.compare body, html.app.compare body { padding-left: 0; } }
+@media print { .pdfpane, .cmpbtn { display: none !important; } html.compare body, html.app.compare body { padding-left: 0; padding-right: 0; } }
 
 /* the handle that drags a paragraph, a heading, a section's summary or a message of a conversation into another app,
    with a link back to it (reader.js, the drags): on hover only, beside the column and outside it, so the zoom's copies
@@ -1144,7 +1148,7 @@ html.compare .chunk > .side, html.compare .chunk > .lside { position: static; }
 /* the map: over the page (which stays under it as it was, for the zoom to play from), the title on the left, each
    section's branch in a colour of its own, each paragraph's topic at its end with its role's dot */
 :root { --br-0: #6B5CE7; --br-1: #2E9E6A; --br-2: #D9822B; --br-3: #3B82C4; --br-4: #C2453D; --br-5: #0F8B8D; }
-.mmap { position: fixed; top: 60px; left: 0; right: 0; bottom: 0; z-index: 6; overflow: auto; overscroll-behavior: contain; background: var(--surface); }
+.mmap { position: fixed; top: 60px; left: 0; right: var(--compare-right, 0px); bottom: 0; z-index: 6; overflow: auto; overscroll-behavior: contain; background: var(--surface); }
 .mm-tools { position: sticky; top: 0; left: 0; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 10px 24px 8px; width: max-content; max-width: 100vw;
   font: 500 12.5px var(--sans); color: var(--muted); background: linear-gradient(var(--surface) 70%, transparent); }
 .mm-tools button { border: 1px solid var(--line); background: var(--card); color: var(--ink-2); border-radius: 999px; padding: 3px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
