@@ -478,6 +478,48 @@ class Server(Base):
         self.assertEqual(self.post("/api/places", {"id": pid, "spans": [[i]]})[0], 400)
         self.assertEqual(self.post("/api/places", {"id": "md-gone-12345678", "spans": []})[0], 404)
 
+    def test_edit_the_selected_source_range(self):
+        text = ("# Diary\n\n## 章节\n\nRepeat the **same** words.\n\nRepeat the **same** words.\n\n"
+                "前面 🧪 要修改这部分，保留后面。\n")
+        pid = self.post("/api/import", {"name": "diary.md", "text": text})[1]["paper"]
+        doc = store.parsed(pid)
+        _, repeat, cjk = list(doc["units"])
+
+        def point(uid, key, at):
+            value, _ = _spans(doc["units"][uid]["toks"], doc["atoms"])
+            return {"unit": uid, "expected": value, key: at}
+
+        def fragment(start, a, end, b):
+            status, result = self.post("/api/text-selection", {"id": pid, "start": point(start, "from", a),
+                                                                 "end": point(end, "to", b)})
+            self.assertEqual(status, 200, result)
+            return result
+
+        selected = fragment(repeat, len("Repeat "), cjk, len("前面 🧪 要修改这部分"))
+        self.assertEqual(selected["text"], "the **same** words.\n\n前面 🧪 要修改这部分")
+
+        selected = fragment(repeat, len("Repeat the "), repeat, len("Repeat the same"))
+        self.assertEqual(selected["text"], "same")
+        shifted = {"id": pid, "start": {**point(repeat, "from", 11), "expected": "A different paragraph."},
+                   "end": point(repeat, "to", 15)}
+        self.assertEqual(self.post("/api/text-selection", shifted), (422, {"error": "selection-not-found"}))
+        edit = {"id": pid, "text": "new", "selection": selected["selection"]}
+        self.assertEqual(self.post("/api/import", edit)[0], 200)
+        i = text.rindex("same")
+        self.assertEqual(local.text_of(pid), text[:i] + "new" + text[i + len("same"):])
+        self.assertEqual(self.post("/api/import", edit), (409, {"error": "selection-changed"}))
+
+    def test_a_selected_fragment_can_be_deleted(self):
+        text = "# Diary\n\nKeep unwanted words.\n"
+        pid = self.post("/api/import", {"text": text})[1]["paper"]
+        uid = next(iter(store.parsed(pid)["units"]))
+        point = {"unit": uid, "expected": "Keep unwanted words."}
+        code, fragment = self.post("/api/text-selection", {"id": pid, "start": {**point, "from": 5},
+                                                           "end": {**point, "to": 14}})
+        self.assertEqual((code, fragment["text"]), (200, "unwanted "))
+        self.assertEqual(self.post("/api/import", {"id": pid, "text": "", "selection": fragment["selection"]})[0], 200)
+        self.assertEqual(local.text_of(pid), "# Diary\n\nKeep words.\n")
+
     def test_no_replace_while_it_is_generated(self):
         pid = self.post("/api/import", {"name": "diary.md", "text": TEXT})[1]["paper"]
         self.jobs.running.append(pid)

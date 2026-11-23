@@ -10,10 +10,13 @@ figure, formula or entry. Read back (markdown.to_html, semantic.normalize), unch
 same paragraphs with the same words and ids, the same formulas, citations and references (tests/test_edit_any.py).
 """
 import re
+from array import array
+from html import unescape
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from . import markdown as md, notes
 from .fetch import image_name
 from .semantic import HEAD_NUM, _label_id
 
@@ -179,3 +182,143 @@ class _Writer:
 def markdown(doc, pictures=None):
     """The Markdown of a document as parse.py reads it (store.parsed); pictures: the folder its figures are kept in."""
     return _Writer(doc, pictures).write()
+
+
+_LINK_DEST = r"\((?:\\.|[^()\\\n]|\((?:\\.|[^()\\\n])*\))*\)|\[[^\]\n]*\]"
+_MARKUP = re.compile(
+    rf"""
+    (?P<space>\s+|<br\s*/?>)
+    | \\\((?P<math>[^\n]+?)\\\)
+    | <(?P<autolink>(?:https?://|mailto:)[^<>\s]+)>
+    | (?P<footnote>\[\^[^\]\n]+\])
+    | (?P<escape>\\[!-/:-@\[-\x60{{-~])
+    | (?P<entity>&(?:\#[0-9]+|\#[xX][0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]+);)
+    | <!--[\s\S]*?-->
+    | <(?P<element>script|style|pre|template|h[1-6])\b[^>]*>[\s\S]*?</(?P=element)\s*>
+    | </?[A-Za-z][\w:-]*(?=[\s/>])(?:"[^"]*"|'[^']*'|[^"'<>])*>
+    | !?\[(?=[^\]\n]*\](?:{_LINK_DEST}))
+    | \](?:{_LINK_DEST})
+    | (?m:^[ \t]*(?:>[ \t]*)+)
+    """,
+    re.I | re.X,
+)
+_EMPHASIS = re.compile(r"(?<!\\)(\*{1,3}|(?<!\w)_{1,3}|~~|\x60+)(?=\S)([^\n]+?)(?<=\S)\1")
+
+
+def _source_chars(text):
+    """Searchable prose and the original character range of each character, with Markdown syntax skipped."""
+    lines = [0] + [m.end() for m in re.finditer("\n", text)] + [len(text)]
+    env = {}
+    blocks = {"heading_open", "front_matter", "fence", "code_block", "math_block", "math_block_label", "hr"}
+    omitted, in_footnotes = [], False
+    for t in md._md().parse(text, env):
+        in_footnotes = in_footnotes or t.type == "footnote_block_open"
+        if t.map and (in_footnotes or t.type in blocks):
+            omitted.append((lines[t.map[0]], lines[t.map[1]]))
+    for ref in env.get("references", {}).values():
+        a, b = ref["map"]
+        omitted.append((lines[a], lines[b]))
+    footnotes = env.get("footnotes", {}).get("refs", {})
+    emphasis, delimiters = [], set()
+    chars, starts, ends = [], array("I"), array("I")
+
+    def add(value, start, end):
+        for c in value:
+            if c.isspace():
+                if chars and chars[-1] == " ":
+                    ends[-1] = end
+                    continue
+                c = " "
+            chars.append(c)
+            starts.append(start)
+            ends.append(end)
+
+    def literal(start, end):
+        for i in range(start, end):
+            if i not in delimiters:
+                add(text[i], i, i + 1)
+
+    def project(start, end):
+        for m in _EMPHASIS.finditer(text, start, end):
+            emphasis.append(m)
+            delimiters.update(range(m.start(), m.start(2)))
+            delimiters.update(range(m.end(2), m.end()))
+        at = start
+        for m in _MARKUP.finditer(text, start, end):
+            literal(at, m.start())
+            if m.group("space"):
+                add(" ", m.start(), m.end())
+            elif m.group("math"):
+                add("$", m.start(), m.start("math"))
+                start, end_math = m.span("math")
+                while start < end_math and text[start].isspace():
+                    start += 1
+                while end_math > start and text[end_math - 1].isspace():
+                    end_math -= 1
+                for i in range(start, end_math):
+                    add(text[i], i, i + 1)
+                add("$", m.end("math"), m.end())
+            elif m.group("autolink"):
+                literal(*m.span("autolink"))
+            elif m.group("footnote") and f":{m[0][2:-1]}" not in footnotes:
+                literal(*m.span())
+            elif m.group("escape"):
+                add(m[0][1], m.start(), m.end())
+            elif m.group("entity"):
+                add(unescape(m[0]), m.start(), m.end())
+            at = m.end()
+        literal(at, end)
+
+    at = 0
+    for start, end in sorted(omitted):
+        if start > at:
+            project(at, start)
+        at = max(at, end)
+    project(at, len(text))
+    return "".join(chars), starts, ends, emphasis
+
+
+def selection_span(text, doc, start, end):
+    """Locate a selection by its original units and offsets. Both reading directions must locate the same units."""
+    units = {uid: notes._spans(u["toks"], doc["atoms"])[0] for uid, u in doc["units"].items()}
+    for point, key in ((start, "from"), (end, "to")):
+        plain = units.get(point["unit"])
+        if plain != point["expected"] or not plain or not 0 <= point[key] <= len(plain):
+            return None
+
+    source, starts, ends, emphasis = _source_chars(text)
+    ids = list(units)
+    first, last = ids.index(start["unit"]), ids.index(end["unit"])
+    if first > last:
+        return None
+
+    def locate(reverse):
+        at = len(source) if reverse else 0
+        found = {}
+        for i in (range(len(ids) - 1, first - 1, -1) if reverse else range(last + 1)):
+            uid = ids[i]
+            value = units[uid]
+            if not value:
+                continue
+            match = source.rfind(value, 0, at) if reverse else source.find(value, at)
+            if match >= 0:
+                at = match if reverse else match + len(value)
+                if i in (first, last):
+                    found[uid] = match
+        return found
+
+    forward = locate(False)
+    if len(forward) != len({start["unit"], end["unit"]}) or forward != locate(True):
+        return None
+    a = forward[start["unit"]] + start["from"]
+    b = forward[end["unit"]] + end["to"]
+    if a >= b:
+        return None
+    a, b = starts[a], ends[b - 1]
+    # A selection that crosses one delimiter and covers all its contents includes the matching delimiter.
+    for m in emphasis:
+        if a == m.start(2) and b >= m.end():
+            a = m.start()
+        if b == m.end(2) and a <= m.start():
+            b = m.end()
+    return a, b

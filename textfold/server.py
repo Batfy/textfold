@@ -19,6 +19,8 @@
   GET  /api/text/<id>         {text, original}: a document's text as Markdown (local.text_of), for the reader to put
                               right (a PDF's OCR, a page's words) and send back to /api/import with its id; original: the text it had
                               when it was last generated, before the edits since (null: none; local.original)
+  POST /api/text-selection    {id, start, end}: the Markdown of a reader selection. The returned selection can
+                              accompany replacement text in /api/import to edit only that range.
   POST /api/places            {id, spans: [[from, to], ...]}: where each place of that text is read on the page
                               ({places: [{words: [{unit, tokens}], at: {unit, token, after}} | {section} | null]}:
                               local.places), the edit history's changes marked on it
@@ -754,7 +756,10 @@ def make_handler(jobs):
                     text = local.text_of(pid) if store.valid_id(pid) else None
                     if text is None:
                         return self.json({"error": "no text to edit"}, 404)
-                    return self.json({"text": text, "original": local.original(pid)})
+                    result = {"text": text, "original": local.original(pid)}
+                    if parse_qs(u.query).get("revision") == ["1"]:
+                        result["revision"] = local.text_revision(text)
+                    return self.json(result)
                 m = re.fullmatch(r"/api/doc/([\w.-]+)", u.path)   # (a document not folded yet: its local levels, said so)
                 if m:
                     pid, lang = m.group(1), (parse_qs(u.query).get("lang") or [None])[0]   # (none: the text's own)
@@ -903,20 +908,40 @@ def make_handler(jobs):
                         return self.json({"places": local.places(pid, spans)})   # (text_of: an id of no such document, none)
                     except LookupError:
                         return self.json({"error": "no text"}, 404)
+                if u.path == "/api/text-selection":
+                    pid, start, end = str(body.get("id") or ""), body.get("start"), body.get("end")
+                    for point, key in ((start, "from"), (end, "to")):
+                        if not (isinstance(point, dict) and isinstance(point.get("unit"), str)
+                                and isinstance(point.get("expected"), str) and type(point.get(key)) is int):
+                            return self.json({"error": "invalid selection"}, 400)
+                    try:
+                        selected = local.text_selection(pid, start, end)
+                    except LookupError:
+                        return self.json({"error": "no text to edit"}, 404)
+                    return self.json(selected) if selected else self.json({"error": "selection-not-found"}, 422)
                 if u.path == "/api/import":
                     text, name = str(body.get("text") or ""), str(body.get("name") or "document.md")[:200]
-                    if not text.strip():
+                    selection = body.get("selection")
+                    if selection is not None:
+                        span = selection.get("span") if isinstance(selection, dict) else None
+                        if not (body.get("id") and isinstance(body.get("text"), str)
+                                and isinstance(span, list) and len(span) == 2 and all(type(n) is int for n in span)
+                                and isinstance(selection.get("revision"), str)):
+                            return self.json({"error": "invalid selection"}, 400)
+                    elif not text.strip():
                         return self.json({"error": "empty"}, 400)
                     if body.get("id"):   # an edited text in place of the one stored (a note folded again where it is written, a PDF's OCR put right)
                         pid = str(body["id"])
                         if any(j["pid"] == pid and j["status"] in ("queued", "running") for j in jobs.list()):
                             return self.json({"error": "busy"}, 409)
                         try:
-                            title = local.replace_text(pid, text, name if body.get("name") else None)
+                            title = local.replace_text(pid, text, name if body.get("name") else None, selection=selection)
                         except LookupError:
                             return self.json({"error": "no such document"}, 404)
-                        except ValueError:
-                            return self.json({"error": "not-markdown"}, 400)
+                        except local.StaleSelection:
+                            return self.json({"error": "selection-changed"}, 409)
+                        except ValueError as x:
+                            return self.json({"error": "empty" if str(x) == "empty" else "not-markdown"}, 400)
                         PAGES.pop(pid, None)
                         return self.json({"paper": pid, "title": title, "replaced": True,   # (its levels set aside: none yet)
                                           "pending": store.pending(pid, json.loads(store.read_text(store.pdir(pid) / "meta.json")), None)})

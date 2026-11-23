@@ -522,7 +522,7 @@ dialog.settings.zlib { width: min(980px, calc(100vw - 32px)); }
 /* the Markdown a document was read from, put right by the reader (app.js, editText) */
 dialog.settings.edtext { width: min(900px, calc(100vw - 32px)); }
 .edtext .stp-body { overflow: hidden; padding-bottom: 14px; }
-.ed-text { display: block; width: 100%; height: min(62vh, 640px); box-sizing: border-box; margin-top: 10px; resize: vertical; padding: 12px 14px;
+.ed-text { display: block; width: 100%; max-height: 55vh; box-sizing: border-box; margin-top: 10px; resize: vertical; padding: 12px 14px;
   font: 13px/1.6 var(--mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; outline: none; }
 .ed-text:focus { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 /* what is new after an update (app.js, showNews): each change a title and a few lines; the release notes and a star */

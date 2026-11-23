@@ -2169,20 +2169,42 @@
       const a = rangeAt(unitEl.get(u0)._tx, f0, f0), b = rangeAt(unitEl.get(u1)._tx, t1, t1);
       if (a && b) { const r = document.createRange(); r.setStart(a.startContainer, a.startOffset); r.setEnd(b.endContainer, b.endOffset); sel.removeAllRanges(); sel.addRange(r); }
     }
+    const source = [];
     const anchors = spans.map(([uid, from, to]) => {
       const tx = unitEl.get(uid)._tx, text = tx.textContent;
+      const v = view(uid), L = levelOf(uid);
       let lo = Infinity, hi = -Infinity, jlo = Infinity, jhi = -Infinity;
+      let start = 0, end = 0;
       for (const [a, b, piece] of segments(tx)) {
         if (!piece || b <= from || a >= to) continue;
-        if (piece._i !== undefined) { lo = Math.min(lo, piece._i); hi = Math.max(hi, piece._i); }
+        const i = piece._i;
+        if (i !== undefined) {
+          const word = v.toks[i].t, partial = word && word === text.slice(a, b);
+          if (i < lo) { lo = i; start = partial ? Math.max(0, from - a) : 0; }
+          if (i >= hi) { hi = i; end = partial ? Math.min(b, to) - a : tokPlain(v.toks[i]).length; }
+        }
         if (piece._j !== undefined) { jlo = Math.min(jlo, piece._j); jhi = Math.max(jhi, piece._j); }
       }
-      const tokens = lo <= hi ? [lo, hi] : null, v = view(uid), L = levelOf(uid);
+      const tokens = lo <= hi ? [lo, hi] : null;
       // on a written line (Key, Takeaway): the words of the line selected, the model's too, to mark them as they
       // were selected; the author's words kept after the line, alone, are a passage of the full text
       const line = L >= 1 && L <= 2 && jlo <= jhi;
       const shown = line ? { words: [jlo, jhi], exact: toksText(v.brief, jlo, jhi) } : null;
       const sents = tokens ? v.sents.map((r, k) => [r, k]).filter(([r]) => r[1] > tokens[0] && r[0] <= tokens[1]).map(([, k]) => k) : null;
+      if (tokens && D.app) {
+        const full = U[uid].toks;
+        const expected = toksText(full, 0, full.length - 1);
+        // Translations and their originals share sentence indices. Within an original word, keep the exact selection.
+        const first = v.p ? U[uid].sents[sents[0]] : [lo];
+        const last = v.p ? U[uid].sents[sents[sents.length - 1]] : [hi, hi + 1];
+        if (!v.p && text === expected) {
+          source.push({ unit: uid, expected, from: Array.from(text.slice(0, from)).length, to: Array.from(text.slice(0, to)).length });
+        } else if (first && last) {
+          const offset = (i, n) => Array.from(toksText(full, 0, i - 1, true) + tokPlain(full[i]).slice(0, n)).length;
+          source.push({ unit: uid, expected, from: offset(first[0], v.p ? 0 : start),
+            to: offset(last[1] - 1, v.p ? tokPlain(full[last[1] - 1]).length : end) });
+        }
+      }
       // the quote in plain text, from the tokens (a formula as $LaTeX$), not from the page, which also holds each
       // formula's hidden source; words the model wrote itself are taken from the page as they are
       const quote = tokens
@@ -2213,31 +2235,31 @@
         anchors.push({ unit: null, section: c.id, on, lang, level, tokens, sents: null, quote: { exact, prefix: '', suffix: '' } });
       }
     }
-    return anchors.length ? anchors : null;
+    return anchors.length ? { anchors, source } : null;
   }
 
   // ── the bar over a selection ──
   const selbar = h('div', 'selbar');
   selbar.hidden = true;
   document.body.append(selbar);
-  let selAnchors = null;
+  let selection = null;
   function showSelbar() {
     if (busy || stage) return;
-    const anchors = selectionAnchors();
-    if (!anchors) { hideSelbar(); return; }
-    selAnchors = anchors;
+    selection = selectionAnchors();
+    if (!selection) { hideSelbar(); return; }
+    const { anchors, source } = selection;
     const t = T[ui];
     selbar.innerHTML = `<button type="button" data-act="hl">${esc(t.n_highlight)}</button>${swatches('hl', toneOf({ anchor: anchors[0] }), 0, lastShade)}` +
       `<button type="button" data-act="note">${esc(t.n_note)}</button>` +
       `<button type="button" data-act="ask">${esc(t.n_ask)}</button>` +
       // the author's words, which the reader can put right in any document (app.js, editText)
-      (window.DRApp && window.DRApp.editText && anchors[0].tokens ? `<button type="button" data-act="edit">${esc(t.ed_fix)}</button>` : '');
+      (window.DRApp && window.DRApp.editText && source.length ? `<button type="button" data-act="edit">${esc(t.ed_fix)}</button>` : '');
     selbar.hidden = false;
     const r = getSelection().getRangeAt(0).getBoundingClientRect(), w = selbar.offsetWidth;
     selbar.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
     selbar.style.top = `${r.top > 70 ? r.top - 44 : r.bottom + 8}px`;
   }
-  function hideSelbar() { selbar.hidden = true; selAnchors = null; }
+  function hideSelbar() { selbar.hidden = true; selection = null; }
   // a dot for each shade a highlight may have (data-s), in the colour of the level it is made at; in a note opened, its
   // own is on; over a selection, the one Highlight takes is ringed
   function swatches(act, tone, on, last) {
@@ -2248,12 +2270,13 @@
   selbar.addEventListener('mousedown', (e) => e.preventDefault());   // keep the selection while a button is pressed
   selbar.addEventListener('click', (e) => {
     // a dot marks the selection in its shade; Highlight, and a note (opened to write), in the shade last chosen
-    const b = e.target.closest('button'), act = b && b.dataset.act, anchors = selAnchors;
-    if (!act || !anchors) return;
+    const b = e.target.closest('button'), act = b && b.dataset.act;
+    if (!act || !selection) return;
+    const { anchors, source } = selection;
     if (act === 'edit') {
       hideSelbar();
       getSelection().removeAllRanges();
-      window.DRApp.editText(anchors[0].quote.exact);
+      window.DRApp.editText(source[0], source[source.length - 1]);
       return;
     }
     if (act === 'hl' && b.dataset.s) useShade(+b.dataset.s);

@@ -1228,17 +1228,19 @@
       }
       return out;
     }
-    // The Markdown a document was read from, put right by the reader (a PDF's OCR): opened where the words selected
-    // are, saved in place of the old text (local.replace_text: the notes stay) and generated again, the model asked only
-    // for the sections that changed; or saved only, to be put right in other places first and generated once (the top
-    // bar says it is to be). Any document's: a Markdown file's, a converted file's, and an arXiv paper's or a web page's,
-    // written from its page (editable.py). span: the characters of the Markdown to open at, in place of the words (a
-    // place of the review)
-    async function editText(words, span = null) {
+    async function editText(start, end) {
       const T = t();
       if (jobFor(PAPER.id)) { alert(T.ed_busy); return; }
-      let text;
-      try { text = (await api(`/api/text/${encodeURIComponent(PAPER.id)}`)).text; } catch (x) { alert(errText(x.message)); return; }
+      let fragment;
+      try { fragment = await api('/api/text-selection', { id: PAPER.id, start, end }); }
+      catch (x) { alert(x.message === 'selection-not-found' ? T.ed_selection_missing : errText(x.message)); return; }
+      editFragment(fragment.text, fragment.selection);
+    }
+    const editError = (msg, T) => msg === 'busy' ? T.ed_busy
+      : msg === 'selection-changed' ? T.ed_selection_changed : msg === 'empty' ? T.ed_empty : errText(msg);
+    function editFragment(text, selection) {
+      const T = t();
+      if (jobFor(PAPER.id)) { alert(T.ed_busy); return; }
       const dlg = h('dialog', 'settings prefs edtext'); document.body.append(dlg);
       dlg.innerHTML = `<div class="stp"><header class="stp-head"><h2>${esc(T.ed_title)}</h2><button type="button" class="stp-x" aria-label="${esc(T.close)}" title="${esc(T.close)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6l8 8M14 6l-8 8"/></svg></button></header>
         <div class="stp-body"><p class="st-note">${esc(T.ed_note)}</p><textarea class="ed-text" spellcheck="false"></textarea></div>
@@ -1248,22 +1250,23 @@
       const ta = dlg.querySelector('.ed-text'), save = dlg.querySelector('.ed-save'), only = dlg.querySelector('.ed-only');
       dlg.addEventListener('close', () => dlg.remove());
       dlg.querySelector('.stp-x').onclick = dlg.querySelector('.ed-cancel').onclick = () => dlg.close();
-      dlg.showModal();
-      // the words selected, else their first few, else the top: the text above them measured where it wraps
-      const at = span ? span[0] : [words, (words || '').split(/\s+/).slice(0, 4).join(' ')].map((w) => (w ? text.indexOf(w) : -1)).find((i) => i >= 0) ?? 0;
-      ta.value = text.slice(0, at);
-      const above = ta.scrollHeight;
       ta.value = text;
+      ta.rows = Math.max(3, Math.min(16, text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / 72)), 0)));
+      dlg.showModal();
       ta.focus();
-      ta.setSelectionRange(at, span ? span[1] : at + (words && text.startsWith(words, at) ? words.length : 0));
-      ta.scrollTop = Math.max(0, above - ta.clientHeight / 3);
+      ta.setSelectionRange(0, 0);
       const keep = async (generate) => {
         if (ta.value === text) { dlg.close(); return; }
         save.disabled = true;
         if (only) only.disabled = true;
         let r;
-        try { r = await api('/api/import', { id: PAPER.id, text: ta.value }); }
-        catch (x) { save.disabled = false; if (only) only.disabled = false; alert(x.message === 'busy' ? T.ed_busy : errText(x.message)); return; }
+        try { r = await api('/api/import', { id: PAPER.id, text: ta.value, selection }); }
+        catch (x) {
+          save.disabled = false;
+          if (only) only.disabled = false;
+          alert(editError(x.message, T));
+          return;
+        }
         dlg.close();
         const lang = (window.__reader && window.__reader.lang) || 'en';
         if (generate) { if (reviewing) reviewing.stop(); regenerate(r.pending.length ? r.pending : [lang]); return; }
@@ -1281,11 +1284,15 @@
     async function review(k = 0) {
       const T = t(), lang = () => (window.__reader && window.__reader.lang) || 'en';
       if (reviewing) return;
-      let text, original, places, where;
+      let text, original, revision, places, spans, where;
       try {
-        ({ text, original } = await api(`/api/text/${encodeURIComponent(PAPER.id)}`));
+        ({ text, original, revision } = await api(`/api/text/${encodeURIComponent(PAPER.id)}?revision=1`));
         places = original === null ? [] : placesOf(original, text);
-        if (places.length) ({ places: where } = await api('/api/places', { id: PAPER.id, spans: places.map((p) => [p.at, p.at + p.now.length]) }));
+        spans = places.map((p) => {
+          const start = Array.from(text.slice(0, p.at)).length;
+          return [start, start + Array.from(p.now).length];
+        });
+        if (spans.length) ({ places: where } = await api('/api/places', { id: PAPER.id, spans }));
       } catch (x) { alert(errText(x.message)); return; }
       const R = window.__reader;   // (the page just opened: in by now)
       if (!places.length || !R || reviewing) return;
@@ -1318,14 +1325,14 @@
       };
       $('.rv-prev').onclick = () => go(k - 1);
       $('.rv-next').onclick = () => go(k + 1);
+      const selected = () => ({ span: spans[k], revision });
       $('.rv-undo').onclick = async () => {
         if (jobFor(PAPER.id)) { alert(T.ed_busy); return; }
-        const p = places[k];
-        try { await api('/api/import', { id: PAPER.id, text: text.slice(0, p.at) + p.was + text.slice(p.at + p.now.length) }); }
-        catch (x) { alert(x.message === 'busy' ? T.ed_busy : errText(x.message)); return; }
+        try { await api('/api/import', { id: PAPER.id, text: places[k].was, selection: selected() }); }
+        catch (x) { alert(editError(x.message, T)); return; }
         saved();
       };
-      $('.rv-edit').onclick = () => editText(null, [places[k].at, places[k].at + places[k].now.length]);
+      $('.rv-edit').onclick = () => editFragment(places[k].now, selected());
       $('.rv-regen').onclick = () => {
         if (!confirm(T.ed_clears_ask)) return;
         stop();

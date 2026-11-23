@@ -105,6 +105,20 @@ class EditAny(Base):
             self.assertEqual({(e["f"], e["tk"]) for e in again["edges"]}, {(e["f"], e["tk"]) for e in doc["edges"]})
             self.assertEqual(bool(again.get("bib")), bool(doc.get("bib")))
 
+    def test_edit_selection_from_a_page_with_no_source_markdown(self):
+        unit = "S1.p1.1"
+        expected = "Folding is old [1]. See Figure 1 and Eq. 1. It is very old, and still done."
+        a = expected.index("very")
+        point = {"unit": unit, "expected": expected}
+        fragment = local.text_selection(PID, {**point, "from": a}, {**point, "to": a + len("very old")})
+        self.assertEqual(fragment["text"], "*very* old")
+        # Editing only the quoted word keeps the formatting around it.
+        fragment = local.text_selection(PID, {**point, "from": a}, {**point, "to": a + len("very")})
+        text = local.text_of(PID)
+        self.assertEqual(fragment["text"], "very")
+        local.replace_text(PID, "quite", selection=fragment["selection"])
+        self.assertEqual(local.text_of(PID), text.replace("*very* old", "*quite* old"))
+
     def test_edited_only_what_changed_is_new_and_every_edit_undone_it_is_the_page_again(self):
         d = store.pdir(PID)
         page = (d / "source.html").read_bytes()

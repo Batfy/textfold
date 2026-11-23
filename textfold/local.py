@@ -179,6 +179,27 @@ def original(pid):
     return store.read_text(f) if store.valid_id(pid) and f.exists() else None
 
 
+class StaleSelection(Exception):
+    """The source changed after the editor opened."""
+
+
+def text_revision(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def text_selection(pid, start, end):
+    """Read only the Markdown covered by a reader selection, with its bounds and revision for saving."""
+    with _REPLACING:
+        text = text_of(pid)
+        if text is None:
+            raise LookupError(pid)
+        span = editable.selection_span(text, store.parsed(pid), start, end)
+    if span is None:
+        return None
+    a, b = span
+    return {"text": text[a:b], "selection": {"span": [a, b], "revision": text_revision(text)}}
+
+
 def keep_text(d, text):
     """The text a stored document (its folder, d) has now (text_of), kept as an edit takes its place (replace_text) if
     it is the first since the document was last generated, until it is generated again (settle): the page's edit
@@ -213,7 +234,7 @@ def settle(pid):
         os.replace(tmp, d / "meta.json")
 
 
-def replace_text(pid, text, name=None, base=None):
+def replace_text(pid, text, name=None, base=None, *, selection=None):
     """A stored document's text replaced by an edited one, under the same id: a Markdown file's, a converted file's (a
     PDF's Markdown, its OCR put right by the reader; its title, authors and source stay the file's, and the file stays
     beside it), or a page's (an arXiv paper's, a web page's: its text written from the page, editable.py; its title and
@@ -225,9 +246,10 @@ def replace_text(pid, text, name=None, base=None):
     sections whose text changed (pipeline.py); none at all for a text put back. The languages they were in are kept in
     its meta ("pending", with those of an edit before not made again yet): the page says they are to be generated again,
     and does it for all of them at once (app.js), so a text can be put right in several places first and the model asked
-    once. Returns the new title. LookupError: no such document, or none with a text to edit (text_of)."""
+    once. With selection, text replaces only its span if the source revision still matches. Returns the new title.
+    LookupError: no such document, or none with a text to edit (text_of)."""
     with _REPLACING:
-        return _replace(pid, text, name, base)
+        return _replace(pid, text, name, base, selection)
 
 
 def _html_of(pid, text, was, name=None):
@@ -238,11 +260,20 @@ def _html_of(pid, text, was, name=None):
     return was.get("title", ""), markdown.to_html(text)[0], {}
 
 
-def _replace(pid, text, name, base):
+def _replace(pid, text, name, base, selection):
     d = store.pdir(pid)
     before = text_of(pid)
     if before is None:
         raise LookupError(pid)
+    if selection is not None:
+        if selection["revision"] != text_revision(before):
+            raise StaleSelection
+        a, b = selection["span"]
+        if not 0 <= a <= b <= len(before):
+            raise ValueError("invalid selection")
+        text = before[:a] + text + before[b:]
+        if not text.strip():
+            raise ValueError("empty")
     was = json.loads(store.read_text(d / "meta.json"))
     title, html, meta = _html_of(pid, text, was, name)
     en = store.read(pid, "en")
