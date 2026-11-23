@@ -2,7 +2,7 @@
 
 A text read in a language the interface has no words for shows the interface in English, so a reading language needs
 one line in langs.py and nothing more. An interface language needs more: its words in every table of
-textfold/web/i18n.js, in the tutorial and in the desktop app's menu, and it must be a reading language too, under the
+textfold/web/i18n.js, in the tutorial and in the desktop app's link messages, and it must be a reading language too, under the
 same name. Swedish and Danish were once reading languages that no menu offered (issue #13).
 
 Run from the repo root:
@@ -58,11 +58,10 @@ class LanguagesTest(unittest.TestCase):
     def test_the_tutorial(self):
         self.assertEqual(rows(WEB / "tutorial.js", "W"), set(INTERFACE))
 
-    def test_the_desktop_menu(self):
+    def test_the_desktop_link_message(self):
         main = ROOT / "desktop" / "main.js"
         if not main.exists():
             self.skipTest("no desktop/ here")
-        self.assertEqual(set(inline(main, "CHECK")), set(INTERFACE))
         self.assertEqual(set(inline(main, "MISSING")), set(INTERFACE))   # (a link to a document not in the library)
 
     def test_the_website_names_every_reading_language(self):

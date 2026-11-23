@@ -259,6 +259,8 @@ class Install(unittest.TestCase):
     def test_the_app_s_host_runs_as_the_app_does(self):
         out = capture.install([self.EXT], dirs={"chrome": self.tmp / "c"}, home=self.tmp / "home", app=True)
         launcher = Path(json.loads(out[0].read_text())["path"]).read_text()
+        if os.name == "nt":
+            launcher = os.path.expandvars(launcher)
         for said in ("TEXTFOLD_RUNTIME_ID=desktop", "PYTHONNOUSERSITE=1", "PYTHONUTF8=1", " -s -m textfold capture-host"):
             self.assertIn(said, launcher)
         self.assertIn(str(store.ROOT), launcher)   # (the app's code, where Python would not look)
