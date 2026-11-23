@@ -6,7 +6,7 @@
 // ~/.textfold. Pages on other sites open in the system browser, where the reader is already signed in.
 // Run from the repository without a payload (`npm start`), it uses the python3 on the PATH (python on Windows) and the
 // repository itself. textfold:// links open a document of the library in the window (links.js).
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, shell } = require('electron');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
@@ -24,6 +24,8 @@ const CODE = PACKED ? path.join(PAYLOAD, 'app') : path.join(__dirname, '..');
 
 let server = null;
 let win = null;
+let tray = null;
+let quitting = false;
 let base = null;      // the server's address, once it answers
 let waiting = null;   // a link that came before that: the last one, opened then
 
@@ -39,7 +41,7 @@ else if (WIN) app.setPath('userData', path.join(process.env.LOCALAPPDATA || path
 app.commandLine.appendSwitch('disk-cache-size', String(32 * 2 ** 20));
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', (_e, argv) => {
-  if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+  showWindow();
   follow(links.fromArgv(argv));
 });
 
@@ -78,21 +80,23 @@ async function inLibrary(id) {
 async function go() {
   const parts = waiting;
   waiting = null;
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
-  if (!(await inLibrary(parts.paper))) {
-    await dialog.showMessageBox(win, { type: 'info', message: inLocale(MISSING), detail: parts.paper });
-    if (!win.isDestroyed()) win.loadURL(`${base}/`);
+  const window = win;
+  showWindow();
+  const found = await inLibrary(parts.paper);
+  if (window.isDestroyed()) return;
+  if (!found) {
+    await dialog.showMessageBox(window, { type: 'info', message: inLocale(MISSING), detail: parts.paper });
+    if (!window.isDestroyed()) window.loadURL(`${base}/`);
     return;
   }
-  if (win.isDestroyed()) return;
   const url = links.readerUrl(base, parts);
   // the reader reads #u=, #s=, #n= and #level= as it opens, so a link into the page already open opens it again
-  if (url.includes('#') && win.webContents.getURL().split('#')[0] === url.split('#')[0]) {
-    win.webContents.executeJavaScript(`history.replaceState(null, '', ${JSON.stringify(url)}); location.reload();`).catch(() => win.loadURL(url));
+  if (url.includes('#') && window.webContents.getURL().split('#')[0] === url.split('#')[0]) {
+    window.webContents.executeJavaScript(`history.replaceState(null, '', ${JSON.stringify(url)}); location.reload();`).catch(() => {
+      if (!window.isDestroyed()) window.loadURL(url);
+    });
   } else {
-    win.loadURL(url);
+    window.loadURL(url);
   }
 }
 
@@ -207,6 +211,11 @@ async function open() {
     autoHideMenuBar: true,   // (Windows: the menu bar shows on Alt)
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
   });
+  win.on('close', (event) => {
+    if (!tray || quitting) return;
+    event.preventDefault();
+    win.hide();
+  });
   win.loadFile(path.join(__dirname, 'splash.html'));
   // full screen, from View › Toggle Full Screen or the reader's Aa: the page told when it changes (its button's name)
   for (const ev of ['enter-full-screen', 'leave-full-screen']) win.on(ev, () => win.webContents.send('fullscreen', win.isFullScreen()));
@@ -222,8 +231,11 @@ async function open() {
   });
 
   const port = await freePort();
+  if (quitting) return;
   startServer(port);
-  if (!(await waitReady(port))) {
+  const ready = await waitReady(port);
+  if (quitting || win.isDestroyed()) return;
+  if (!ready) {
     const where = path.join(app.getPath('userData'), 'server.log');
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<pre style="font:14px -apple-system,'Segoe UI',sans-serif;padding:24px;white-space:pre-wrap">TextFold could not start its server.\n\nThe log is in ${where}</pre>`)}`);
     return;
@@ -267,6 +279,27 @@ function inLocale(table) {
   return table[/^zh-(TW|HK|MO)|Hant/i.test(loc) ? 'zh-Hant' : loc.split('-')[0]] || table.en;
 }
 
+function showWindow() {
+  if (quitting || !win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function createTray() {
+  const iconPath = app.isPackaged ? path.join(process.resourcesPath, 'tray-icon.png')
+    : path.join(__dirname, 'build', 'icon.png');
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) return;
+  tray = new Tray(icon);
+  tray.setToolTip('TextFold');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: inLocale({ en: 'Open TextFold', zh: '打开 TextFold', 'zh-Hant': '開啟 TextFold' }), click: showWindow },
+    { label: inLocale({ en: 'Quit TextFold', zh: '退出 TextFold', 'zh-Hant': '結束 TextFold' }), role: 'quit' },
+  ]));
+  tray.on('double-click', showWindow);
+}
+
 // The system's own menu and the project on GitHub.
 const REPO = 'https://github.com/chenxiachan/textfold';
 function menu() {
@@ -280,7 +313,15 @@ function menu() {
   ]));
 }
 
-app.whenReady().then(() => { menu(); open(); });
+app.whenReady().then(() => {
+  menu();
+  if (WIN) createTray();
+  open();
+});
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { if (server) server.kill(); });
+app.on('before-quit', () => { quitting = true; });
+app.on('will-quit', () => {
+  if (tray) tray.destroy();
+  if (server) server.kill();
+});
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) open(); });

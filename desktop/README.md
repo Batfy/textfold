@@ -80,6 +80,8 @@ in the bundle, the bundled Python and its compiled modules included, with the ha
 
 ## Windows
 
+Click **×** to hide the window in the notification area. Right-click the TextFold tray icon to open the window or quit the app.
+
 The server runs with no console window of its own, and the programs it starts (agents, MinerU, npx) start without
 one either (`server._quiet_children`). An agent installed by npm is a `.cmd` shim, which would pass its arguments
 through cmd.exe; the script it names is run by node instead (`agents.argv`). The installer is per user, in

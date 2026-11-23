@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.10.56",
+    "en": [
+      ["Keep TextFold in the Windows notification area", "Click × to hide the window and keep TextFold running. Right-click its notification-area icon to reopen the window or quit TextFold."]
+    ],
+    "zh": [
+      ["Windows 关闭窗口后可在托盘恢复", "点击右上角的 × 会收起窗口，TextFold 继续在后台运行。右键任务栏通知区域里的 TextFold 图标，可重新打开窗口或退出程序。"]
+    ]
+  },
+  {
     "version": "0.10.47",
     "en": [
       ["🚀 Your notes, all in one place (beta)", "Every highlight, note and question you've left in your texts now gathers under Notes, at the bottom of the sidebar. Wondering \"What did I read today?\" or \"What have I been chewing on this month?\" Click a day or a month on the calendar, or drag across a stretch of days, and there it is."],
